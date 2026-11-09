@@ -76,3 +76,6 @@ Thumbs.db
 Desktop.ini
 
 NUL
+
+# Local trial state
+trial-state/
