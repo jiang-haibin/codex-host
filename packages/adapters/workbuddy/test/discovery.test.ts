@@ -67,6 +67,7 @@ describe("WorkBuddy app discovery", () => {
     ["C:\\Users\\Test\\AppData\\Local\\Programs\\WorkBuddy", "WorkBuddy.exe"],
     ["C:\\Users\\Test\\AppData\\Local\\Programs\\WorkBuddy AI", "WorkBuddy AI.exe"],
     ["C:\\Program Files\\WorkBuddy", "WorkBuddy.exe"],
+    ["D:\\Workbuddy", "WorkBuddy.exe"],
     ["D:\\Portable WorkBuddy", "WorkBuddy.exe"],
     ["D:\\Portable WorkBuddy", "WorkBuddyAI.exe"],
   ])("finds a Windows app in %s", (root, name) => {

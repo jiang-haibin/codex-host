@@ -115,6 +115,29 @@ describe("WorkBuddy desktop application updates", () => {
     expect(result.manualUpdateUrl).toContain("https://download.codebuddy.cn/");
   });
 
+  it("recognizes domestic WorkBuddy product metadata without explicit updateUrl", async () => {
+    const fetchText = vi.fn(async () =>
+      feed("win32-x64-user", "5.9.3.500", "https://download.codebuddy.cn/workbuddy/saas"),
+    );
+    const result = await createWorkBuddyInstallation(
+      {},
+      {
+        platform: "win32",
+        arch: "x64",
+        readProduct: async () => ({
+          applicationName: "WorkBuddy",
+          genieVersion: "5.8.0",
+          endpoint: "https://www.workbuddy.cn",
+        }),
+        fetchText,
+      },
+    )("check");
+    expect(fetchText).toHaveBeenCalledWith(
+      "https://www.workbuddy.cn/v2/update?platform=workbuddy-win32-x64-user",
+    );
+    expect(result.manualUpdateUrl).toContain("https://download.codebuddy.cn/");
+  });
+
   it.each(["5.5.2.999", "5.4.0.999"])(
     "does not offer a downgrade or an unidentifiable build-only change: %s",
     async (version) => {

@@ -15,6 +15,10 @@ const windowsRoots = [
   "${ProgramFiles}/WorkBuddy AI",
   "${ProgramFiles}/WorkBuddy",
   "${ProgramFiles}/WorkBuddyAI",
+  "${SystemDrive}/Workbuddy",
+  "${SystemDrive}/WorkBuddy",
+  "D:/Workbuddy",
+  "D:/WorkBuddy",
 ];
 const macSpec: HarnessDiscoverySpec = {
   id: "workbuddy",

@@ -73,8 +73,10 @@ async function readProductJson(file: string): Promise<unknown | undefined> {
 }
 
 function bundledFallbackProductPath(invocation: ReturnType<typeof workBuddyInvocation>) {
-  const cli = invocation.arguments[0];
-  if (!cli || cli.startsWith("-")) return;
+  const cli = invocation.arguments.find(
+    (arg) => typeof arg === "string" && !arg.startsWith("-") && arg.endsWith("codebuddy"),
+  );
+  if (!cli) return;
   return path.join(path.dirname(path.dirname(cli)), "product.json");
 }
 

@@ -95,11 +95,18 @@ export function workBuddyEnvironment(
 ): NodeJS.ProcessEnv {
   const paths = targetPath(platform);
   const configuredRoot = environment.WORKBUDDY_CONFIG_DIR;
-  const root = paths.resolve(
-    configuredRoot?.trim()
-      ? configuredRoot
-      : paths.join(environment.HOME || environment.USERPROFILE || homedir(), ".workbuddy-ai"),
-  );
+  const userHome = environment.HOME || environment.USERPROFILE || homedir();
+  let defaultDir = paths.join(userHome, ".workbuddy-ai");
+  if (!configuredRoot?.trim()) {
+    try {
+      if (statSync(paths.join(userHome, ".workbuddy")).isDirectory()) {
+        defaultDir = paths.join(userHome, ".workbuddy");
+      }
+    } catch {
+      // Keep .workbuddy-ai as default fallback
+    }
+  }
+  const root = paths.resolve(configuredRoot?.trim() ? configuredRoot : defaultDir);
   return {
     ...environment,
     // The bundled core reads CODEBUDDY_CONFIG_DIR. Force both names to one

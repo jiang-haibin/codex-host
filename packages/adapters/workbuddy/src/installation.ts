@@ -14,6 +14,7 @@ interface WorkBuddyProduct {
   applicationName?: unknown;
   genieVersion?: unknown;
   updateUrl?: unknown;
+  endpoint?: unknown;
 }
 
 const applicationNotice = {
@@ -88,8 +89,9 @@ export function createWorkBuddyInstallation(
     const root =
       product.applicationName === "workbuddy-ai" && product.updateUrl === "https://www.workbuddy.ai"
         ? "https://www.workbuddy.ai"
-        : product.applicationName === "workbuddy" &&
-            product.updateUrl === "https://www.workbuddy.cn"
+        : (product.applicationName === "workbuddy" || product.applicationName === "WorkBuddy") &&
+            (product.updateUrl === "https://www.workbuddy.cn" ||
+              product.endpoint === "https://www.workbuddy.cn")
           ? "https://www.workbuddy.cn"
           : undefined;
     const target =
