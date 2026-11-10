@@ -1,14 +1,19 @@
 @echo off
 setlocal
 
+set "HAS_RUNNING=0"
 for %%E in (ChatGPT.exe codexhost.exe) do (
     for /f "tokens=1 delims=," %%P in ('tasklist.exe /NH /FO CSV /FI "IMAGENAME eq %%E"') do (
-        if /i "%%~P"=="%%E" (
-            echo Close Codex Desktop and CodexHost before starting the trial.
-            pause
-            exit /b 1
-        )
+        if /i "%%~P"=="%%E" set "HAS_RUNNING=1"
     )
+)
+if "%HAS_RUNNING%"=="1" (
+    echo Existing Codex Desktop or CodexHost process is running.
+    choice /C YN /M "Force close existing instances and start"
+    if errorlevel 2 exit /b 1
+    taskkill /F /IM ChatGPT.exe >nul 2>&1
+    taskkill /F /IM codexhost.exe >nul 2>&1
+    timeout /t 1 /nobreak >nul
 )
 
 REM 1. Capture real host user profile before sandbox redirection
