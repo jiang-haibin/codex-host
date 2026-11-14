@@ -1,0 +1,8 @@
+node_modules/
+trial-state/
+host-state/
+host-state.staging/
+/backups/
+*.log
+.DS_Store
+Thumbs.db
