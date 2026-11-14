@@ -81,6 +81,21 @@ export async function createGptSideChat(source, params, request) {
   }
 }
 
+export async function createCallerSideChat(request, bridge, nativeRequest, create = createGptSideChat) {
+  const params = request.params;
+  if (request.method !== "thread/fork" || params?.ephemeral !== true ||
+      params.attachToSource === true || typeof params.threadId !== "string") return null;
+  const owners = await bridge.ownership([params.threadId]);
+  const harnessId = owners.get(params.threadId);
+  if (!harnessId) return null;
+  const parent = await bridge.request("thread/read", { threadId: params.threadId, includeTurns: true });
+  if (parent.error) return { error: parent.error };
+  const thread = parent.result?.thread;
+  if (!thread || !Array.isArray(thread.turns)) throw new Error("The parent transcript is unavailable");
+  // The caller's native connection must create the thread so it also receives its turn events.
+  return create({ ...thread, harnessId }, params, nativeRequest);
+}
+
 function replaceOnce(source, before, after, marker) {
   if (source.includes(marker)) return source;
   if (source.split(before).length !== 2) throw new Error(`Side-chat patch no longer matches: ${marker}`);
@@ -109,6 +124,20 @@ export async function install() {
       await this.#writer.json(rpcEnvelope(request, { ...response, id: request.id }));
       return;
     }`, "codexhost-gpt-sidechat-runtime-v2");
+  const sharedRoute = "        const reply2 = await this.#options.sharedThreads.route(request);";
+  runtime = replaceOnce(runtime, sharedRoute, `        // codexhost-gpt-sidechat-caller-v1
+        if (!this.#options.externalOnly) {
+          const sideChatReply = await (${createCallerSideChat.toString()})(
+            request, this.#options.sharedThreads,
+            (method, params) => this.#requestOfficial(method, params),
+            ${helper}
+          );
+          if (sideChatReply) {
+            await this.#writer.json(rpcEnvelope(request, { ...sideChatReply, id: request.id }));
+            return;
+          }
+        }
+${sharedRoute}`, "codexhost-gpt-sidechat-caller-v1");
   const updates = [[runtimeFile, runtime]];
   // The same routing code is bundled for Desktop and Web; keep both copies consistent.
   for (const name of ["desktop-controller.mjs", "host-runtime.mjs"]) {
