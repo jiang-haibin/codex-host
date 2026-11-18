@@ -7,6 +7,9 @@ Set shell = CreateObject("WScript.Shell")
 
 baseDir = fso.GetParentFolderName(WScript.ScriptFullName)
 cliCmd = fso.BuildPath(baseDir, "node_modules\.bin\codexhost.cmd")
+If fso.FileExists(fso.BuildPath(baseDir, "node_modules\.codexhost-next\node_modules\.bin\codexhost.cmd")) Then
+    cliCmd = fso.BuildPath(baseDir, "node_modules\.codexhost-next\node_modules\.bin\codexhost.cmd")
+End If
 historyHome = fso.BuildPath(baseDir, "host-state\codex")
 
 If WScript.Arguments.Count >= 2 Then

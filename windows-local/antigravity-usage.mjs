@@ -12,10 +12,33 @@ const modelLabels = Object.freeze({
   "gemini-3.8-flash": "Gemini 3.8 Flash",
   "gemini-4-argon": "Gemini 4 Argon",
   "gemini-4-hydrogen": "Gemini 4 Hydrogen",
+  "gemini-pro-orchestrator-g1-pro": "Orchestrator (Argon)",
+  "claude-opus-5-5": "Claude Opus 5.5",
+  "claude-sonnet-5-5": "Claude Sonnet 5.5",
+  "gpt-oss-120b": "GPT-OSS 120B",
 });
 const modelIdsByLabel = new Map(Object.entries(modelLabels).map(([id, label]) => [label, id]));
 // These models have only implicit caching in the Gemini Developer API.
 const implicitCacheModels = new Set(["gemini-4-argon", "gemini-4-hydrogen"]);
+
+function normalizeModelId(value) {
+  const aliased = modelAliases.get(value) ?? value;
+  if (aliased.startsWith("claude-")) {
+    return aliased.replace(/(?:-thinking)?(?:-(?:low|medium|high|xhigh))?$/u, "");
+  }
+  return aliased.replace(/-(?:low|medium|high|xhigh)$/u, "");
+}
+
+function modelProvider(model) {
+  if (model.startsWith("gemini-")) return "google";
+  if (model.startsWith("claude-")) return "anthropic";
+  if (model.startsWith("gpt-") && !model.startsWith("gpt-oss-")) return "openai";
+  return undefined;
+}
+
+function hasImplicitZeroCacheWrite(model) {
+  return implicitCacheModels.has(model) || model.startsWith("gemini-") || model.startsWith("gpt-");
+}
 const decoder = new TextDecoder();
 const fixedFieldLengths = { 1: 8, 5: 4 };
 
@@ -57,7 +80,7 @@ function modelId(bytes) {
   if (!(bytes instanceof Uint8Array)) return undefined;
   const value = decoder.decode(bytes);
   if (!/^[a-z\d][a-z\d._:/@-]{0,511}$/iu.test(value)) return undefined;
-  return modelAliases.get(value) ?? value.replace(/-(low|medium|high)$/u, "");
+  return normalizeModelId(value);
 }
 
 function* generationSteps(generation) {
@@ -146,7 +169,10 @@ async function addRequestMetadata(databasePath, entries, signal) {
         const seconds = [...fields(timestamp)].find(([field]) => field === 1)?.[1];
         // A rollback can reuse step indices. Match the request's creation time too.
         if (seconds !== Math.floor(entry.occurredAtMs / 1000)) return entry;
-        if (!entry.model && model) enriched = { ...entry, model };
+        if (!entry.model && model) {
+          const provider = entry.provider ?? modelProvider(model);
+          enriched = { ...entry, model, ...(provider ? { provider } : {}) };
+        }
         if (enriched.cacheWriteInputTokens === undefined) {
           return withCacheUsage(enriched, metadata.get(9));
         }
@@ -296,21 +322,23 @@ export async function createHarnessAdapter(context) {
   let listedSources = new Map();
   adapter.usageStatistics = Object.freeze({
     ...usage,
-    async readModelLabels() {
-      return modelLabels;
+    async readModelLabels(...args) {
+      const upstreamLabels = await usage.readModelLabels?.(...args);
+      return { ...modelLabels, ...upstreamLabels };
     },
     async listSources(signal) {
       const sources = await usage.listSources(signal);
       const fingerprints = new Map();
+      const enriched = [];
       for (const source of sources) {
         signal.throwIfAborted();
         const state = await databaseState(conversationDatabase(source.id));
         const database = state?.fingerprint ?? null;
         fingerprints.set(source.id, { database, transcript: source.fingerprint });
-        source.fingerprint += `:antigravity-usage-v3:${database ?? "-"}`;
+        enriched.push({ ...source, fingerprint: `${source.fingerprint}:antigravity-usage-v3:${database ?? "-"}` });
       }
       listedSources = fingerprints;
-      return sources;
+      return enriched;
     },
     async readSource(id, signal) {
       const listed = listedSources.get(id);
@@ -329,13 +357,18 @@ export async function createHarnessAdapter(context) {
       return enriched.map((entry) => {
         const model = entry.model ?? transcriptModels?.get(entry.id);
         if (!model) return entry;
+        const provider = entry.provider ?? modelProvider(model);
+        const withModel = entry.model
+          ? entry
+          : { ...entry, model, ...(provider ? { provider } : {}) };
         if (
-          entry.cacheWriteInputTokens === undefined && entry.cachedInputTokens !== undefined &&
-          implicitCacheModels.has(model)
+          withModel.cacheWriteInputTokens === undefined &&
+          withModel.cachedInputTokens !== undefined &&
+          hasImplicitZeroCacheWrite(model)
         ) {
-          return { ...entry, model, cacheWriteInputTokens: 0 };
+          return { ...withModel, cacheWriteInputTokens: 0 };
         }
-        return entry.model ? entry : { ...entry, model };
+        return withModel;
       });
     },
   });
@@ -348,68 +381,70 @@ export async function warmup(adapter) {
 }
 
 function replaceOnce(source, target, replacement, label) {
-  if (!source.includes(target)) {
-    throw new Error(`Unable to patch ${label}: anchor not found`);
+  if (source.split(target).length !== 2) {
+    throw new Error(`Unable to patch ${label}: expected one matching anchor`);
   }
-  return source.replace(target, replacement);
+  return source.replace(target, () => replacement);
 }
 
 export function patchPluginSource(source) {
   let result = source;
 
-  // 1. toolTargetFile 支持 PascalCase 的 Path 参数
-  const targetFileAnchor = `function toolTargetFile(toolName, params) {
-  if (!isAntigravityFileMutatingTool(toolName))
-    return null;
-  const record3 = unwrapParameters(params);
-  if (!record3)
-    return null;
-  const rawPath = extractString(record3, [
-    "TargetFile",`;
-  const targetFilePatched = `function toolTargetFile(toolName, params) {
-  if (!isAntigravityFileMutatingTool(toolName))
-    return null;
-  const record3 = unwrapParameters(params);
-  if (!record3)
-    return null;
-  const rawPath = extractString(record3, [
-    "Path",
-    "TargetFile",`;
-  if (!result.includes(`const rawPath = extractString(record3, [\n    "Path",`) && result.includes(targetFileAnchor)) {
-    result = replaceOnce(result, targetFileAnchor, targetFilePatched, "plugin.mjs toolTargetFile");
+  // ACP 原生文件差异由上游处理，这里补充工具名称和命令展示。
+  if (!result.includes(`if (compact === "managetask")`)) {
+    const fnMatch = /function synthesizeAntigravityCommand\(toolName, params, cwd\) \{[\s\S]*?\r?\n\}/u.exec(result);
+    if (!fnMatch) {
+      throw new Error("Unable to patch plugin.mjs synthesizeAntigravityCommand: function boundary not found");
+    }
+    const fnBody = fnMatch[0];
+    const recordMatch = /const (record\d*) = unwrapParameters\(params\);/u.exec(fnBody);
+    const tailMatch = /(    return \{ command: commandLine, \.\.\.resolvedCwd \? \{ cwd: resolvedCwd \} : \{\} \};\r?\n  \}\r?\n  return null;\r?\n\})/u.exec(fnBody);
+    if (!recordMatch || !tailMatch) {
+      throw new Error("Unable to patch plugin.mjs synthesizeAntigravityCommand: anchor not found");
+    }
+    const recordVar = recordMatch[1];
+    const eol = tailMatch[0].includes("\r\n") ? "\r\n" : "\n";
+    const patchedBody = fnBody.replace(
+      tailMatch[1],
+      [
+        `    return { command: commandLine, ...resolvedCwd ? { cwd: resolvedCwd } : {} };`,
+        `  }`,
+        `  if (compact === "managetask") {`,
+        `    const action = extractString(${recordVar}, ["Action", "action"])?.trim();`,
+        `    const taskId = extractString(${recordVar}, ["TaskId", "taskId", "task_id"])?.trim();`,
+        `    const parts = ["manage_task", action, taskId].filter(Boolean);`,
+        `    return { command: parts.join(" "), ...cwd ? { cwd } : {} };`,
+        `  }`,
+        `  if (compact === "searchweb") {`,
+        `    const query = extractString(${recordVar}, ["query", "Query"])?.trim();`,
+        `    const command = query ? \`search_web \${query}\` : "search_web";`,
+        `    return { command, ...cwd ? { cwd } : {} };`,
+        `  }`,
+        `  return null;`,
+        `}`,
+      ].join(eol)
+    );
+    result = replaceOnce(result, fnBody, patchedBody, "plugin.mjs synthesizeAntigravityCommand");
   }
 
-  // 2. synthesizeAntigravityCommand 支持 manage_task 与 search_web
-  const synthesizeTail = `    return { command: commandLine, ...resolvedCwd ? { cwd: resolvedCwd } : {} };
-  }
-  return null;
-}
-function startAntigravityToolItem`;
-  const synthesizePatched = `    return { command: commandLine, ...resolvedCwd ? { cwd: resolvedCwd } : {} };
-  }
-  if (compact === "managetask") {
-    const action = extractString(record3, ["Action", "action"])?.trim();
-    const taskId = extractString(record3, ["TaskId", "taskId", "task_id"])?.trim();
-    const parts = ["manage_task", action, taskId].filter(Boolean);
-    return { command: parts.join(" "), ...cwd ? { cwd } : {} };
-  }
-  if (compact === "searchweb") {
-    const query = extractString(record3, ["query", "Query"])?.trim();
-    const command = query ? \`search_web \${query}\` : "search_web";
-    return { command, ...cwd ? { cwd } : {} };
-  }
-  return null;
-}
-function startAntigravityToolItem`;
-  if (!result.includes(`if (compact === "managetask")`) && result.includes(synthesizeTail)) {
-    result = replaceOnce(result, synthesizeTail, synthesizePatched, "plugin.mjs synthesizeAntigravityCommand");
-  }
-
-  // 3. 修复过时工具名，并约束大文件先搜索定位行号再读取
-  const oldInstruction = `var ANTIGRAVITY_WORKSPACE_FILE_INSTRUCTION = "[System Instruction: When creating new files in the workspace, you MUST use the write_to_file tool. When modifying existing files, use the replace_file_content tool. CRITICAL: NEVER include ArtifactMetadata when calling write_to_file for workspace files (ArtifactMetadata is strictly reserved for artifacts in the brain directory, and providing it for workspace files causes a path validation rejection). Do NOT use terminal commands (such as Set-Content, Out-File, echo, or cat) to create or write code files. For clarification, ask_question is connected to the codexhost Desktop through a Hook. Use single-choice or text questions. The Hook returns the actual user response in its reason while blocking the native auto-skip behavior; do not retry merely because the native tool reports it was blocked.]\\n\\n";`;
-  const newInstruction = `var ANTIGRAVITY_WORKSPACE_FILE_INSTRUCTION = "[System Instruction: When creating new files in the workspace, you MUST use the write_file tool. When modifying existing files, use the edit_file tool. CRITICAL: NEVER include ArtifactMetadata when calling write_file for workspace files (ArtifactMetadata is strictly reserved for artifacts in the brain directory, and providing it for workspace files causes a path validation rejection). Do NOT use terminal commands (such as Set-Content, Out-File, echo, or cat) to create or write code files. When inspecting large files or truncated command outputs, NEVER call read_file repeatedly chunk-by-chunk; first run a targeted search command (e.g., rg -n or node) to locate exact line numbers, then call read_file only on the needed line range. For clarification, ask_question is connected to the codexhost Desktop through a Hook. Use single-choice or text questions. The Hook returns the actual user response in its reason while blocking the native auto-skip behavior; do not retry merely because the native tool reports it was blocked.]\\n\\n";`;
-  if (result.includes(oldInstruction)) {
-    result = replaceOnce(result, oldInstruction, newInstruction, "plugin.mjs ANTIGRAVITY_WORKSPACE_FILE_INSTRUCTION");
+  // 通过 ACP systemPromptAppend 保留大文件先搜索定位的提示。
+  const readFileGuideline =
+    "When inspecting large files or truncated command outputs, NEVER call read_file repeatedly chunk-by-chunk; " +
+    "first run a targeted search command (e.g., rg -n or node) to locate exact line numbers, then call read_file only on the needed line range.";
+  if (!result.includes("codexhost-antigravity-read-file-instruction-v1")) {
+    const delegationAnchor = `  #delegationPrompt() {
+    const prompt = antigravityDelegationInstructions(this.#options.environment);
+    return prompt ? { systemPromptAppend: prompt } : {};
+  }`;
+    const delegationPatched = `  #delegationPrompt() {
+    // codexhost-antigravity-read-file-instruction-v1
+    const prompt = [
+      antigravityDelegationInstructions(this.#options.environment),
+      ${JSON.stringify(`[System Instruction: ${readFileGuideline}]`)}
+    ].filter(Boolean).join("\\n\\n");
+    return prompt ? { systemPromptAppend: prompt } : {};
+  }`;
+    result = replaceOnce(result, delegationAnchor, delegationPatched, "plugin.mjs #delegationPrompt");
   }
 
   return result;
@@ -538,16 +573,10 @@ function toolCommandActions(toolName, args, command) {
     }];
   }
   return [];
-} `;
-  if (!result.includes("function toolCommandActions(") && result.includes(oldToolCommandLine)) {
+}`;
+  if (!result.includes("function toolCommandActions(")) {
     result = replaceOnce(result, oldToolCommandLine, newToolCommandLine, "host-runtime.mjs toolCommandLine");
   }
-  const brokenReadActionRegex = 'name: filePath.replace(/[/\\]+$/u, "").split(/[/\\]/u).pop() || filePath,';
-  const fixedReadActionRegex = 'name: filePath.replace(/[/\\\\]+$/u, "").split(/[/\\\\]/u).pop() || filePath,';
-  if (result.includes(brokenReadActionRegex)) {
-    result = replaceOnce(result, brokenReadActionRegex, fixedReadActionRegex, "host-runtime.mjs toolCommandActions regex fix");
-  }
-
   // 2. 扩展 fileChangeFromTool 支持 PascalCase 参数
   const oldFileChangeFromTool = `function fileChangeFromTool(toolName, args) {
   if (!isFileMutatingTool(toolName))
@@ -603,7 +632,7 @@ function toolCommandActions(toolName, args, command) {
   }
   const oldText = nestedString(args, ["Target", "target", "old_string", "oldString", "oldText", "old_text", "old"], true);
   const newText = nestedString(args, ["Replacement", "replacement", "Content", "new_string", "newString", "newText", "new_text", "content", "new"], true);`;
-  if (!result.includes(`nestedString(args, ["Target", "target"`) && result.includes(oldFileChangeFromTool)) {
+  if (!result.includes(`nestedString(args, ["Target", "target"`)) {
     result = replaceOnce(result, oldFileChangeFromTool, newFileChangeFromTool, "host-runtime.mjs fileChangeFromTool");
   }
 
@@ -642,7 +671,7 @@ function toolCommandActions(toolName, args, command) {
           durationMs: item.durationMs ?? null
         };
       }`;
-  if (!result.includes(`commandActions: toolCommandActions(`) && result.includes(oldProjectToolExecution)) {
+  if (!result.includes(`commandActions: toolCommandActions(`)) {
     result = replaceOnce(result, oldProjectToolExecution, newProjectToolExecution, "host-runtime.mjs projectItem");
   }
 
@@ -659,31 +688,34 @@ async function replaceFile(destination, contents) {
   }
 }
 
-async function patchOptionalFile(fileUrl, patcher) {
-  const original = await readFile(fileUrl, "utf8");
-  const patched = patcher(original);
-  if (patched !== original) {
-    await replaceFile(fileUrl, patched);
-  }
-}
-
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  const packageRoot = new URL(`./node_modules/@codexhost/cli-${process.platform}-${process.arch}/`, import.meta.url);
-  const metadata = JSON.parse(await readFile(new URL("package.json", packageRoot), "utf8"));
-  if (typeof metadata.version === "string" && /^0\.\d+\./u.test(metadata.version)) {
-    const appRoot = new URL("app/", packageRoot);
-    const pluginRoot = new URL("plugins/antigravity/", appRoot);
-    const manifestFile = new URL("manifest.json", pluginRoot);
-    const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
-    const entry = "antigravity-usage.mjs";
-    if (manifest.entry === "plugin.mjs" || manifest.entry === entry) {
-      await replaceFile(new URL(entry, pluginRoot), await readFile(new URL(import.meta.url)));
-      if (manifest.entry !== entry) {
-        manifest.entry = entry;
-        await replaceFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
-      }
-    }
-    await patchOptionalFile(new URL("plugin.mjs", pluginRoot), patchPluginSource);
-    await patchOptionalFile(new URL("host-runtime.mjs", appRoot), patchHostRuntimeSource);
+  const modules = process.argv.includes("--next") ? "node_modules/.codexhost-next/node_modules" : "node_modules";
+  const appRoot = new URL(`./${modules}/@codexhost/cli-${process.platform}-${process.arch}/app/`, import.meta.url);
+  const pluginRoot = new URL("plugins/antigravity/", appRoot);
+  const manifestFile = new URL("manifest.json", pluginRoot);
+  const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
+  const entry = "antigravity-usage.mjs";
+  if (!["plugin.mjs", entry].includes(manifest.entry)) {
+    throw new Error(`Unexpected upstream Antigravity plugin entry: ${manifest.entry}`);
+  }
+  const bundles = await Promise.all([
+    [new URL("plugin.mjs", pluginRoot), patchPluginSource],
+    [new URL("host-runtime.mjs", appRoot), patchHostRuntimeSource],
+  ].map(async ([file, patch]) => {
+    const original = await readFile(file, "utf8");
+    return { file, original, patched: patch(original) };
+  }));
+  // 在确认两个入口都兼容后写入，最后切换插件清单。
+  for (const { file, original, patched } of bundles) {
+    if (patched !== original) await replaceFile(file, patched);
+  }
+  const wrapper = new URL(entry, pluginRoot);
+  const contents = await readFile(new URL(import.meta.url), "utf8");
+  if (await readFile(wrapper, "utf8").catch((error) => {
+    if (error.code !== "ENOENT") throw error;
+  }) !== contents) await replaceFile(wrapper, contents);
+  if (manifest.entry !== entry) {
+    manifest.entry = entry;
+    await replaceFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
   }
 }

@@ -1,15 +1,16 @@
 ## 本分支新增的 Windows 本机功能
 
-本机启动器和补丁集中在 `windows-local/`，使用 npm 安装的 `@codexhost/cli@0.19.0`。
+本机启动器、历史工具与运行时补丁集中在 `windows-local/`，使用 npm 安装的 `@codexhost/cli@0.21.0`（外部 Harness 的临时与持久侧聊已改用上游实现，原实验性侧聊补丁 `sidechat-gpt.mjs` 已停用移除）。
 
-- **历史迁移与增量同步**。支持独立的 `host-state/`、项目侧栏迁移、官方 Codex 与 Host 间的 GPT 历史同步，以及每分钟运行的 Windows 同步计划任务。
-- **Antigravity 用量补全**。补全模型、缓存读取和缓存写入统计，并识别会话中的模型切换记录。
-- **工具与文件修改展示**。补充文件参数识别、编辑差异、任务管理、搜索和命令执行展示。
-- **Windows 启动入口**。提供普通、独立试用与静默启动，配置 WorkBuddy、Antigravity 路径和代理例外。
-- **通知点击守护与回退**。处理通知点击额外拉起官方窗口的问题，并提供撤销脚本。
-- **GPT 临时侧聊（实验性）**。将外部 Harness 的临时侧聊接到 GPT，传入有长度限制的参考上下文。已修正响应编号覆盖与桌面回复事件订阅问题，独立协议回归已通过，完整界面流程仍需重启加载补丁后验证。
+- **历史迁移与增量同步**（`codex-history.mjs`）。支持独立的 `host-state/`、项目侧栏迁移、官方 Codex 与 Host 间的 GPT 历史同步，以及每分钟运行的 Windows 同步计划任务。
+- **Antigravity 用量与模型补全**（`antigravity-usage.mjs`）。优先使用上游统计，从原生会话 `.db` 与 `transcript.jsonl` 补全缺失模型、缓存读取和缓存写入统计，兼容模型切换与新模型标签。
+- **Antigravity 会话回放修复**（`antigravity-replay.mjs`）。放宽 `0.21.0` `nativeReplayCompletion` 对 `session_info_update` 的硬性等待及字符数精确比对，增加读取降级与 `1500ms` 兜底收敛，解决无标题会话与 `agy 1.5.11+` 打开历史卡死超时的问题。
+- **工具展示与大文件读取提示**（`antigravity-usage.mjs`）。沿用 ACP 原生差异，修补 `plugin.mjs` 与 `host-runtime.mjs` 补充 PascalCase 参数、`manage_task`、`search_web`、读取文件/命令执行展示与 `read_file` 提示。
+- **本机插件白名单**（`enabled-plugins.mjs`）。在 `plugins/enabled.json` 中仅启用 `antigravity`、`workbuddy` 与 `codex-usage`。
+- **渲染器性能优化**（`renderer-performance.mjs`）。修补 `renderer-extension.js`，隐藏提示控件时跳过 `scrollWidth/clientWidth` 读取，减少强制样式重算。
+- **Windows 启动入口与通知守护**（`Start-CodexHost.cmd` / `Start-CodexHost-Silent.vbs` / `Start-CodexHost-Trial.cmd`、`Watch-CodexToast.ps1` / `Undo-CodexToastWatcher.ps1`）。支持 `.codexhost-next` 并行切换，配置 WorkBuddy、Antigravity 路径与代理例外，拦截通知点击额外拉起官方窗口（附回退脚本）。
 
-首次使用请先迁移历史，再在 `windows-local/` 中运行 `npm ci`。本机路径、各脚本作用、同步边界和侧聊状态见 [Windows 定制使用说明](windows-local/README.md)。
+首次使用请先迁移历史，再在 `windows-local/` 中运行 `npm ci`（`postinstall` 会自动应用当前启用的 4 个补丁脚本）。本机路径、各脚本作用与同步边界见 [Windows 定制使用说明](windows-local/README.md)。
 
 ---
 

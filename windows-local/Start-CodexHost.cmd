@@ -51,7 +51,9 @@ REM 5. Keep toast clicks from opening the official Codex instance
 start "" /b powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "%~dp0Watch-CodexToast.ps1" >nul 2>&1
 
 pushd "%~dp0" || exit /b 1
-call "%~dp0node_modules\.bin\codexhost.cmd"
+set "CODEXHOST_CLI=%~dp0node_modules\.bin\codexhost.cmd"
+if exist "%~dp0node_modules\.codexhost-next\node_modules\.bin\codexhost.cmd" set "CODEXHOST_CLI=%~dp0node_modules\.codexhost-next\node_modules\.bin\codexhost.cmd"
+call "%CODEXHOST_CLI%"
 set "CODEXHOST_EXIT=%ERRORLEVEL%"
 popd
 if not "%CODEXHOST_EXIT%"=="0" (
