@@ -1,8 +1,10 @@
 {
   "scripts": {
-    "postinstall": "node antigravity-usage.mjs && node antigravity-replay.mjs && node enabled-plugins.mjs && node renderer-performance.mjs"
+    "postinstall": "node antigravity-usage.mjs && node sidechat-sidebar.mjs && node enabled-plugins.mjs && node renderer-performance.mjs",
+    "stage": "node stage-codexhost.mjs",
+    "verify": "node resolve-codexhost.mjs --check"
   },
   "dependencies": {
-    "@codexhost/cli": "0.21.0"
+    "@codexhost/cli": "0.22.0"
   }
 }

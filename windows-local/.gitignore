@@ -1,4 +1,5 @@
 node_modules/
+.codexhost-staged/
 trial-state/
 host-state/
 host-state.staging/

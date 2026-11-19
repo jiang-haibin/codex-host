@@ -43,8 +43,20 @@ REM 6. Keep toast clicks from opening the official Codex instance
 start "" /b powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "%~dp0Watch-CodexToast.ps1" >nul 2>&1
 
 pushd "%~dp0" || exit /b 1
-set "CODEXHOST_CLI=%~dp0node_modules\.bin\codexhost.cmd"
-if exist "%~dp0node_modules\.codexhost-next\node_modules\.bin\codexhost.cmd" set "CODEXHOST_CLI=%~dp0node_modules\.codexhost-next\node_modules\.bin\codexhost.cmd"
+set "CODEXHOST_CLI="
+for /f "usebackq delims=" %%I in (`node "%~dp0resolve-codexhost.mjs"`) do set "CODEXHOST_CLI=%%I"
+if not defined CODEXHOST_CLI (
+    popd
+    echo Could not locate the CodexHost version pinned in package.json.
+    pause
+    exit /b 1
+)
+if not exist "%CODEXHOST_CLI%" (
+    popd
+    echo Resolved CodexHost CLI does not exist: %CODEXHOST_CLI%
+    pause
+    exit /b 1
+)
 call "%CODEXHOST_CLI%"
 set "CODEXHOST_EXIT=%ERRORLEVEL%"
 popd

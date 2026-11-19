@@ -12,14 +12,16 @@ const modelLabels = Object.freeze({
   "gemini-3.8-flash": "Gemini 3.8 Flash",
   "gemini-4-argon": "Gemini 4 Argon",
   "gemini-4-hydrogen": "Gemini 4 Hydrogen",
+  "gemini-4-neon": "Gemini 4 Neon",
   "gemini-pro-orchestrator-g1-pro": "Orchestrator (Argon)",
+  "gemini-pro-orchestrator-neon": "Orchestrator (Neon)",
   "claude-opus-5-5": "Claude Opus 5.5",
   "claude-sonnet-5-5": "Claude Sonnet 5.5",
   "gpt-oss-120b": "GPT-OSS 120B",
 });
 const modelIdsByLabel = new Map(Object.entries(modelLabels).map(([id, label]) => [label, id]));
 // These models have only implicit caching in the Gemini Developer API.
-const implicitCacheModels = new Set(["gemini-4-argon", "gemini-4-hydrogen"]);
+const implicitCacheModels = new Set(["gemini-4-argon", "gemini-4-hydrogen", "gemini-4-neon"]);
 
 function normalizeModelId(value) {
   const aliased = modelAliases.get(value) ?? value;
@@ -688,9 +690,20 @@ async function replaceFile(destination, contents) {
   }
 }
 
+function resolveModulesUrl(argv) {
+  const index = argv.indexOf("--modules");
+  if (index !== -1) {
+    const custom = argv[index + 1];
+    if (!custom) throw new Error("Missing path after --modules");
+    return pathToFileURL(`${resolve(custom).replace(/[\\/]+$/u, "")}/`);
+  }
+  const relative = argv.includes("--next") ? "./node_modules/.codexhost-next/node_modules/" : "./node_modules/";
+  return new URL(relative, import.meta.url);
+}
+
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  const modules = process.argv.includes("--next") ? "node_modules/.codexhost-next/node_modules" : "node_modules";
-  const appRoot = new URL(`./${modules}/@codexhost/cli-${process.platform}-${process.arch}/app/`, import.meta.url);
+  const modulesUrl = resolveModulesUrl(process.argv.slice(2));
+  const appRoot = new URL(`@codexhost/cli-${process.platform}-${process.arch}/app/`, modulesUrl);
   const pluginRoot = new URL("plugins/antigravity/", appRoot);
   const manifestFile = new URL("manifest.json", pluginRoot);
   const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
