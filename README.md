@@ -5,7 +5,7 @@
 - **历史迁移与增量同步**（`codex-history.mjs`）。支持独立的 `host-state/`、项目侧栏迁移、官方 Codex 与 Host 间的 GPT 历史同步，以及每分钟运行的 Windows 同步计划任务。
 - **Antigravity 用量与模型补全**（`antigravity-usage.mjs`）。优先使用上游统计，从原生会话 `.db` 与 `transcript.jsonl` 补全缺失模型、缓存读取和缓存写入统计，兼容模型切换与新模型标签（含 `Gemini 4 Neon`、`Orchestrator (Neon)` 等）。
 - **工具展示与大文件读取提示**（`antigravity-usage.mjs`）。沿用 ACP 原生差异，修补 `plugin.mjs` 与 `host-runtime.mjs` 补充 PascalCase 参数、`manage_task`、`search_web`、读取文件/命令执行展示与 `read_file` 提示。
-- **持久侧边对话侧栏隔离修复**（`sidechat-sidebar.mjs`）。修补 `host-runtime.mjs` 与 `desktop-controller.mjs`：对带 `attachedToThreadId` 的持久侧边对话不再广播 `thread/started` 通知（与官方 `codex.exe` 一致，避免侧边对话自动进入左侧项目聊天记录），同时补全桥接层 `thread/fork` 归属登记。
+- **持久侧边对话侧栏隔离修复**（`sidechat-sidebar.mjs`）。修补 `host-runtime.mjs` 与 `desktop-controller.mjs`：对带 `attachedToThreadId` 的持久侧边对话不再广播 `thread/started` 通知（与官方 `codex.exe` 一致，避免侧边对话自动进入左侧项目聊天记录），同时补全桥接层 `thread/fork` 归属登记，并支持 `--prune-catalog` 清理 `codex.db` 中此前残留的侧栏缓存行。
 - **本机插件白名单**（`enabled-plugins.mjs`）。在 `plugins/enabled.json` 中仅启用 `antigravity`、`workbuddy` 与 `codex-usage`。
 - **渲染器性能优化**（`renderer-performance.mjs`）。修补 `renderer-extension.js`，隐藏提示控件时跳过 `scrollWidth/clientWidth` 读取，减少强制样式重算。
 - **版本化安全升级与 Windows 启动/通知守护**（`resolve-codexhost.mjs`、`stage-codexhost.mjs`、`Start-CodexHost.cmd` / `Start-CodexHost-Silent.vbs` / `Start-CodexHost-Trial.cmd`、`Watch-CodexToast.ps1` / `Undo-CodexToastWatcher.ps1`）。启动器按 `package.json` 锁定版本精确解析 CLI，支持在 `.codexhost-staged/<version>/` 原子预装并避开运行期文件锁，配置 WorkBuddy、Antigravity 路径与代理例外，并拦截通知点击额外拉起官方窗口（附回退脚本）。
