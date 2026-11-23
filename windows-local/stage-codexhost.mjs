@@ -57,6 +57,69 @@ function applyAllPatches(modulesDir, repoRoot = REPO_ROOT) {
   }
 }
 
+const CORE_APP_RELATIVE_FILES = [
+  "codexhost-distribution.json",
+  "console-server.mjs",
+  "console-web.js",
+  "desktop-controller.mjs",
+  "host-runtime.mjs",
+  "renderer-extension.js",
+  "web-server.mjs",
+  path.join("plugins", "enabled.json"),
+  path.join("plugins", "antigravity", "manifest.json"),
+  path.join("plugins", "antigravity", "plugin.mjs"),
+];
+
+/**
+ * 若杀毒软件误杀隔离了 app/ 下的脚本文件（如 desktop-controller.mjs），
+ * 在不替换已锁定的 .exe 二进制的前提下，从官方 tarball 原地提取恢复缺失文件。
+ */
+function restoreMissingAppFiles(modulesDir, targetVersion, stagedRoot) {
+  const appRoot = path.join(modulesDir, PLATFORM_PACKAGE, "app");
+  const missing = CORE_APP_RELATIVE_FILES.filter((rel) => !fs.existsSync(path.join(appRoot, rel)));
+  if (missing.length === 0) {
+    return [];
+  }
+
+  fs.mkdirSync(stagedRoot, { recursive: true });
+  const unpackDir = path.join(stagedRoot, `.restore-${targetVersion}-${process.pid}`);
+  fs.rmSync(unpackDir, { recursive: true, force: true });
+  fs.mkdirSync(unpackDir, { recursive: true });
+
+  try {
+    const spec = `${PLATFORM_PACKAGE}@${targetVersion}`;
+    const packRes =
+      process.platform === "win32"
+        ? runOrThrow(process.env.ComSpec || "cmd.exe", ["/d", "/c", "npm", "pack", spec, "--quiet"], { cwd: unpackDir })
+        : runOrThrow("npm", ["pack", spec, "--quiet"], { cwd: unpackDir });
+    const tgzName =
+      String(packRes.stdout ?? "")
+        .trim()
+        .split(/\r?\n/u)
+        .filter(Boolean)
+        .pop() || fs.readdirSync(unpackDir).find((name) => name.endsWith(".tgz"));
+    if (!tgzName) {
+      throw new Error(`npm pack ${spec} 未生成 tarball`);
+    }
+    runOrThrow("tar", ["-xzf", path.join(unpackDir, tgzName), "-C", unpackDir], { cwd: unpackDir });
+
+    const restored = [];
+    for (const rel of missing) {
+      const src = path.join(unpackDir, "package", "app", rel);
+      const dest = path.join(appRoot, rel);
+      if (!fs.existsSync(src)) {
+        throw new Error(`官方包 ${spec} 中未找到 package/app/${rel}`);
+      }
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(src, dest);
+      restored.push(rel.replace(/\\/gu, "/"));
+    }
+    return restored;
+  } finally {
+    fs.rmSync(unpackDir, { recursive: true, force: true });
+  }
+}
+
 function syntaxCheckInstalled(modulesDir) {
   const appRoot = path.join(modulesDir, PLATFORM_PACKAGE, "app");
   const files = [
@@ -94,10 +157,11 @@ export function stageCodexHost(options = {}) {
   const finalDir = path.join(stagedRoot, targetVersion);
   const finalModules = path.join(finalDir, "node_modules");
 
-  // 如果该版本已存在于暂存槽位且未要求 --force，直接校验并原地幂等刷新补丁。
+  // 如果该版本已存在于暂存槽位且未要求 --force，自动补齐被杀软误删的脚本并原地幂等刷新补丁。
   if (!force && fs.existsSync(finalModules)) {
     const existing = inspectInstallation(finalModules, "staged");
     if (existing.hasBin && existing.version === targetVersion) {
+      const restoredFiles = restoreMissingAppFiles(finalModules, targetVersion, stagedRoot);
       applyAllPatches(finalModules, repoRoot);
       syntaxCheckInstalled(finalModules);
       const patches = verifyInstalledPatches(finalModules, repoRoot);
@@ -106,11 +170,12 @@ export function stageCodexHost(options = {}) {
       }
       const versionOutput = verifyCliVersion(finalModules, targetVersion);
       return {
-        action: "verified-existing",
+        action: restoredFiles.length > 0 ? "restored-existing" : "verified-existing",
         version: targetVersion,
         stagedDir: finalDir,
         cliCmd: existing.cliCmd,
         versionOutput,
+        ...(restoredFiles.length > 0 ? { restoredFiles } : {}),
       };
     }
   }

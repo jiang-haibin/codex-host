@@ -26,9 +26,9 @@ If cliCmd = "" Or Not fso.FileExists(cliCmd) Then
     WScript.Quit 1
 End If
 
-' Check existing ChatGPT.exe / codexhost.exe processes
+' Check existing ChatGPT.exe / codexhost.exe / codexhost-shell.exe processes
 Set wmi = GetObject("winmgmts:\\.\root\cimv2")
-Set procs = wmi.ExecQuery("SELECT Name FROM Win32_Process WHERE Name = 'ChatGPT.exe' OR Name = 'codexhost.exe'")
+Set procs = wmi.ExecQuery("SELECT Name FROM Win32_Process WHERE Name = 'ChatGPT.exe' OR Name = 'codexhost.exe' OR Name = 'codexhost-shell.exe'")
 If procs.Count > 0 Then
     ans = MsgBox("Existing Codex Desktop or CodexHost process is running." & vbCrLf & vbCrLf & "Force close existing instances and restart?", vbYesNo + vbQuestion + vbSystemModal, "CodexHost Launcher")
     If ans <> vbYes Then
@@ -36,6 +36,7 @@ If procs.Count > 0 Then
     End If
     shell.Run "taskkill /F /IM ChatGPT.exe", 0, True
     shell.Run "taskkill /F /IM codexhost.exe", 0, True
+    shell.Run "taskkill /F /IM codexhost-shell.exe", 0, True
     WScript.Sleep 1000
 End If
 
@@ -66,6 +67,7 @@ If exitCode <> 0 Then
     WScript.Quit exitCode
 End If
 exitCode = RunHistory("node.exe", "sync")
+shell.Run "cmd.exe /d /c """"node.exe"" """ & fso.BuildPath(baseDir, "resolve-codexhost.mjs") & """ --prune-stale-owner >nul 2>&1""", 0, True
 logPath = fso.BuildPath(shell.ExpandEnvironmentStrings("%TEMP%"), "codexhost-silent-launch.log")
 
 ' Keep toast clicks from opening the official Codex instance

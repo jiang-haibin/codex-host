@@ -455,129 +455,114 @@ export function patchPluginSource(source) {
 export function patchHostRuntimeSource(source) {
   let result = source;
 
-  // 1. 扩展 toolCommandLine 并补充 toolCommandActions
-  const oldToolCommandLine = `function toolCommandLine(toolName, args) {
-  const lower = toolName.toLowerCase().replaceAll(/[_-]/g, "");
-  const command = nestedString(args, ["command", "cmd", "script", "commandLine", "command_line"]);
-  if (command && ["bash", "exec", "terminal", "run", "shell", "powershell", "pwsh", "command"].includes(lower)) {
-    return command;
-  }
-  const filePath = nestedString(args, [
-    "path",
-    "file_path",
-    "filePath",
-    "file",
-    "filename",
-    "target",
-    "uri"
-  ]);
-  const pattern = nestedString(args, ["pattern", "glob", "glob_pattern", "query", "regex"]);
-  if (["read", "readfile", "fileread", "view"].includes(lower)) {
-    return filePath ? \`read \${filePath}\` : void 0;
-  }
-  if (["glob", "find", "findfiles"].includes(lower)) {
-    const target2 = pattern ?? filePath;
-    return target2 ? \`glob \${target2}\` : void 0;
-  }
-  if (["grep", "grepsearch"].includes(lower)) {
-    if (!pattern)
-      return void 0;
-    return filePath ? \`grep \${pattern} \${filePath}\` : \`grep \${pattern}\`;
-  }
-  return void 0;
-}`;
-  const newToolCommandLine = `function toolCommandLine(toolName, args) {
-  const lower = toolName.toLowerCase().replaceAll(/[_-]/g, "");
-  const command = nestedString(args, ["CommandLine", "command", "cmd", "script", "commandLine", "command_line"]);
-  if (command && ["bash", "exec", "terminal", "run", "shell", "powershell", "pwsh", "command"].includes(lower)) {
-    return command;
-  }
-  const filePath = nestedString(args, [
-    "Path",
-    "TargetFile",
-    "targetFile",
-    "target_file",
-    "AbsolutePath",
-    "absolutePath",
-    "absolute_path",
-    "path",
-    "file_path",
-    "filePath",
-    "file",
-    "filename",
-    "target",
-    "uri"
-  ]);
-  const pattern = nestedString(args, ["Pattern", "Query", "pattern", "glob", "glob_pattern", "query", "regex"]);
-  if (["read", "readfile", "fileread", "view", "viewfile"].includes(lower)) {
-    return filePath ? \`read \${filePath}\` : void 0;
-  }
-  if (["glob", "find", "findfiles"].includes(lower)) {
-    const target2 = pattern ?? filePath;
-    return target2 ? \`glob \${target2}\` : void 0;
-  }
-  if (["grep", "grepsearch"].includes(lower)) {
-    if (!pattern)
-      return void 0;
-    return filePath ? \`grep \${pattern} \${filePath}\` : \`grep \${pattern}\`;
-  }
-  if (lower === "managetask") {
-    const action = nestedString(args, ["Action", "action"]);
-    const taskId = nestedString(args, ["TaskId", "taskId", "task_id"]);
-    return ["manage_task", action, taskId].filter(Boolean).join(" ");
-  }
-  if (lower === "searchweb") {
-    const query = nestedString(args, ["query", "Query"]);
-    return query ? \`search_web \${query}\` : "search_web";
-  }
-  return void 0;
-}
-function toolCommandActions(toolName, args, command) {
-  const lower = toolName.toLowerCase().replaceAll(/[_-]/g, "");
-  const filePath = nestedString(args, [
-    "Path",
-    "TargetFile",
-    "targetFile",
-    "target_file",
-    "AbsolutePath",
-    "absolutePath",
-    "absolute_path",
-    "path",
-    "file_path",
-    "filePath",
-    "file",
-    "filename",
-    "target",
-    "uri"
-  ]);
-  const pattern = nestedString(args, ["Pattern", "Query", "pattern", "glob", "glob_pattern", "query", "regex"]);
-  if (["read", "readfile", "fileread", "view", "viewfile"].includes(lower) && filePath) {
-    return [{
-      type: "read",
-      command,
-      name: filePath.replace(/[/\\\\]+$/u, "").split(/[/\\\\]/u).pop() || filePath,
-      path: filePath
-    }];
-  }
-  if (["glob", "find", "findfiles"].includes(lower)) {
-    return [{
-      type: "listFiles",
-      command,
-      path: filePath ?? null
-    }];
-  }
-  if (["grep", "grepsearch"].includes(lower)) {
-    return [{
-      type: "search",
-      command,
-      query: pattern ?? null,
-      path: filePath ?? null
-    }];
-  }
-  return [];
-}`;
+  // 1. 按函数边界扩展 toolCommandLine 并补充 toolCommandActions（兼容局部变量重命名）
   if (!result.includes("function toolCommandActions(")) {
-    result = replaceOnce(result, oldToolCommandLine, newToolCommandLine, "host-runtime.mjs toolCommandLine");
+    const fnMatch = /function toolCommandLine\(toolName, args\) \{[\s\S]*?\r?\n\}/u.exec(result);
+    if (!fnMatch) {
+      throw new Error("Unable to patch host-runtime.mjs toolCommandLine: function boundary not found");
+    }
+    const fnBody = fnMatch[0];
+    if (
+      !fnBody.includes("nestedString(args,") ||
+      !fnBody.includes('["read", "readfile", "fileread", "view"]') ||
+      !fnBody.includes('["grep", "grepsearch"]')
+    ) {
+      throw new Error("Unable to patch host-runtime.mjs toolCommandLine: anchor not found");
+    }
+    const eol = fnBody.includes("\r\n") ? "\r\n" : "\n";
+    const newToolCommandLine = [
+      `function toolCommandLine(toolName, args) {`,
+      `  const lower = toolName.toLowerCase().replaceAll(/[_-]/g, "");`,
+      `  const command = nestedString(args, ["CommandLine", "command", "cmd", "script", "commandLine", "command_line"]);`,
+      `  if (command && ["bash", "exec", "terminal", "run", "shell", "powershell", "pwsh", "command"].includes(lower)) {`,
+      `    return command;`,
+      `  }`,
+      `  const filePath = nestedString(args, [`,
+      `    "Path",`,
+      `    "TargetFile",`,
+      `    "targetFile",`,
+      `    "target_file",`,
+      `    "AbsolutePath",`,
+      `    "absolutePath",`,
+      `    "absolute_path",`,
+      `    "path",`,
+      `    "file_path",`,
+      `    "filePath",`,
+      `    "file",`,
+      `    "filename",`,
+      `    "target",`,
+      `    "uri"`,
+      `  ]);`,
+      `  const pattern = nestedString(args, ["Pattern", "Query", "pattern", "glob", "glob_pattern", "query", "regex"]);`,
+      `  if (["read", "readfile", "fileread", "view", "viewfile"].includes(lower)) {`,
+      `    return filePath ? \`read \${filePath}\` : void 0;`,
+      `  }`,
+      `  if (["glob", "find", "findfiles"].includes(lower)) {`,
+      `    const target2 = pattern ?? filePath;`,
+      `    return target2 ? \`glob \${target2}\` : void 0;`,
+      `  }`,
+      `  if (["grep", "grepsearch"].includes(lower)) {`,
+      `    if (!pattern)`,
+      `      return void 0;`,
+      `    return filePath ? \`grep \${pattern} \${filePath}\` : \`grep \${pattern}\`;`,
+      `  }`,
+      `  if (lower === "managetask") {`,
+      `    const action = nestedString(args, ["Action", "action"]);`,
+      `    const taskId = nestedString(args, ["TaskId", "taskId", "task_id"]);`,
+      `    return ["manage_task", action, taskId].filter(Boolean).join(" ");`,
+      `  }`,
+      `  if (lower === "searchweb") {`,
+      `    const query = nestedString(args, ["query", "Query"]);`,
+      `    return query ? \`search_web \${query}\` : "search_web";`,
+      `  }`,
+      `  return void 0;`,
+      `}`,
+      `function toolCommandActions(toolName, args, command) {`,
+      `  const lower = toolName.toLowerCase().replaceAll(/[_-]/g, "");`,
+      `  const filePath = nestedString(args, [`,
+      `    "Path",`,
+      `    "TargetFile",`,
+      `    "targetFile",`,
+      `    "target_file",`,
+      `    "AbsolutePath",`,
+      `    "absolutePath",`,
+      `    "absolute_path",`,
+      `    "path",`,
+      `    "file_path",`,
+      `    "filePath",`,
+      `    "file",`,
+      `    "filename",`,
+      `    "target",`,
+      `    "uri"`,
+      `  ]);`,
+      `  const pattern = nestedString(args, ["Pattern", "Query", "pattern", "glob", "glob_pattern", "query", "regex"]);`,
+      `  if (["read", "readfile", "fileread", "view", "viewfile"].includes(lower) && filePath) {`,
+      `    return [{`,
+      `      type: "read",`,
+      `      command,`,
+      `      name: filePath.replace(/[/\\\\]+$/u, "").split(/[/\\\\]/u).pop() || filePath,`,
+      `      path: filePath`,
+      `    }];`,
+      `  }`,
+      `  if (["glob", "find", "findfiles"].includes(lower)) {`,
+      `    return [{`,
+      `      type: "listFiles",`,
+      `      command,`,
+      `      path: filePath ?? null`,
+      `    }];`,
+      `  }`,
+      `  if (["grep", "grepsearch"].includes(lower)) {`,
+      `    return [{`,
+      `      type: "search",`,
+      `      command,`,
+      `      query: pattern ?? null,`,
+      `      path: filePath ?? null`,
+      `    }];`,
+      `  }`,
+      `  return [];`,
+      `}`,
+    ].join(eol);
+    result = replaceOnce(result, fnBody, newToolCommandLine, "host-runtime.mjs toolCommandLine");
   }
   // 2. 扩展 fileChangeFromTool 支持 PascalCase 参数
   const oldFileChangeFromTool = `function fileChangeFromTool(toolName, args) {

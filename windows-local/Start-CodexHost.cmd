@@ -2,7 +2,7 @@
 setlocal
 
 set "HAS_RUNNING=0"
-for %%E in (ChatGPT.exe codexhost.exe) do (
+for %%E in (ChatGPT.exe codexhost.exe codexhost-shell.exe) do (
     for /f "tokens=1 delims=," %%P in ('tasklist.exe /NH /FO CSV /FI "IMAGENAME eq %%E"') do (
         if /i "%%~P"=="%%E" set "HAS_RUNNING=1"
     )
@@ -13,6 +13,7 @@ if "%HAS_RUNNING%"=="1" (
     if errorlevel 2 exit /b 1
     taskkill /F /IM ChatGPT.exe >nul 2>&1
     taskkill /F /IM codexhost.exe >nul 2>&1
+    taskkill /F /IM codexhost-shell.exe >nul 2>&1
     timeout /t 1 /nobreak >nul
 )
 
@@ -65,6 +66,7 @@ if not exist "%CODEXHOST_CLI%" (
     pause
     exit /b 1
 )
+node "%~dp0resolve-codexhost.mjs" --prune-stale-owner >nul 2>&1
 call "%CODEXHOST_CLI%"
 set "CODEXHOST_EXIT=%ERRORLEVEL%"
 popd

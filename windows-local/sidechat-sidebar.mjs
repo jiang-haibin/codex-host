@@ -5,23 +5,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const MARKER = "codexhost-sidechat-sidebar-fix-v1";
 
-const OLD_NOTIFY_STARTED = `  async #notifyExternalThreadStarted(thread3) {
-    await this.#writer.json({
-      method: "thread/started",
-      emittedAtMs: Date.now(),
-      params: { thread: { ...thread3, turns: [] } }
-    });
-  }`;
+// 0.25.1 (#1052) 起上游已在 #notifyExternalThreadStarted 内原生拦截 attachedToThreadId。
+const UPSTREAM_NOTIFY_STARTED_GUARD =
+  /  async #notifyExternalThreadStarted\((thread\d*)\) \{\r?\n    if \(typeof \1\.attachedToThreadId === "string"\) return;/u;
 
-const NEW_NOTIFY_STARTED = `  async #notifyExternalThreadStarted(thread3) {
-    // ${MARKER}: 持久侧边对话不应广播 thread/started（与官方 codex.exe 一致），避免前端误加入左侧项目列表。
-    if (thread3?.attachedToThreadId) return;
-    await this.#writer.json({
-      method: "thread/started",
-      emittedAtMs: Date.now(),
-      params: { thread: { ...thread3, turns: [] } }
-    });
-  }`;
+const OLD_NOTIFY_STARTED_PATTERN =
+  /  async #notifyExternalThreadStarted\((thread\d*)\) \{(\r?\n)    await this\.#writer\.json\(\{\r?\n      method: "thread\/started",\r?\n      emittedAtMs: Date\.now\(\),\r?\n      params: \{ thread: \{ \.\.\.\1, turns: \[\] \} \}\r?\n    \}\);\r?\n  \}/u;
 
 const OLD_OBSERVE_FORK =
   'if (request.method === "thread/start" || request.method === "thread/read" || request.method === "thread/resume") {';
@@ -39,10 +28,29 @@ function replaceOnce(source, target, replacement, label) {
 
 export function patchHostRuntimeSideChatSource(source) {
   let result = source;
-  if (!result.includes(MARKER)) {
-    result = replaceOnce(result, OLD_NOTIFY_STARTED, NEW_NOTIFY_STARTED, "host-runtime.mjs #notifyExternalThreadStarted");
+  if (!result.includes(MARKER) && !UPSTREAM_NOTIFY_STARTED_GUARD.test(result)) {
+    const matches = [...result.matchAll(new RegExp(OLD_NOTIFY_STARTED_PATTERN.source, "gu"))];
+    if (matches.length !== 1) {
+      throw new Error(
+        `Unable to patch host-runtime.mjs #notifyExternalThreadStarted: expected one matching anchor (found ${matches.length})`,
+      );
+    }
+    const [fullMatch, paramVar, eol] = matches[0];
+    const replacement = [
+      `  async #notifyExternalThreadStarted(${paramVar}) {`,
+      `    // ${MARKER}: 持久侧边对话不应广播 thread/started（与官方 codex.exe 一致），避免前端误加入左侧项目列表。`,
+      `    if (${paramVar}?.attachedToThreadId) return;`,
+      `    await this.#writer.json({`,
+      `      method: "thread/started",`,
+      `      emittedAtMs: Date.now(),`,
+      `      params: { thread: { ...${paramVar}, turns: [] } }`,
+      `    });`,
+      `  }`,
+    ].join(eol);
+    result = replaceOnce(result, fullMatch, replacement, "host-runtime.mjs #notifyExternalThreadStarted");
   }
-  if (!result.includes(NEW_OBSERVE_FORK)) {
+  // 0.24.0 起 host-runtime.mjs 不再内联桥接客户端 observeBridgeResult（仅保留在 desktop-controller.mjs），仅存在时修补以兼容旧版。
+  if (result.includes("observeBridgeResult") && !result.includes(NEW_OBSERVE_FORK)) {
     result = replaceOnce(result, OLD_OBSERVE_FORK, NEW_OBSERVE_FORK, "host-runtime.mjs observeBridgeResult");
   }
   return result;

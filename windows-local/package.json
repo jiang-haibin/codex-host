@@ -5,6 +5,6 @@
     "verify": "node resolve-codexhost.mjs --check"
   },
   "dependencies": {
-    "@codexhost/cli": "0.22.0"
+    "@codexhost/cli": "0.25.1"
   }
 }

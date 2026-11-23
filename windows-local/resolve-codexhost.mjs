@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -97,10 +98,14 @@ export function verifyInstalledPatches(modulesDir, repoRoot = REPO_ROOT) {
     if (!runtimeSource.includes("commandActions: toolCommandActions(")) {
       issues.push("host-runtime.mjs 缺少 projectItem commandActions 补丁");
     }
-    if (!runtimeSource.includes("codexhost-sidechat-sidebar-fix-v1")) {
+    const hasUpstreamSideChatGuard =
+      /async #notifyExternalThreadStarted\((thread\d*)\) \{\r?\n\s*if \(typeof \1\.attachedToThreadId === "string"\) return;/u.test(
+        runtimeSource,
+      );
+    if (!runtimeSource.includes("codexhost-sidechat-sidebar-fix-v1") && !hasUpstreamSideChatGuard) {
       issues.push("host-runtime.mjs 缺少侧边对话 thread/started 过滤补丁");
     }
-    if (!runtimeSource.includes('request.method === "thread/fork"')) {
+    if (runtimeSource.includes("observeBridgeResult") && !runtimeSource.includes('request.method === "thread/fork"')) {
       issues.push("host-runtime.mjs 缺少 observeBridgeResult thread/fork 归属登记补丁");
     }
   }
@@ -135,6 +140,55 @@ export function verifyInstalledPatches(modulesDir, repoRoot = REPO_ROOT) {
   return { ok: issues.length === 0, issues };
 }
 
+/**
+ * 在 Windows 上安全清理已失效或被系统进程复用的 local-host-runtime-owner-v1/owner，
+ * 避免 upstream shim 读取高权限进程启动时间时因 ERROR_ACCESS_DENIED (os error 5) 退出。
+ */
+export function pruneStaleLocalOwner(dataDir = process.env.CODEXHOST_DATA_DIR) {
+  if (process.platform !== "win32") {
+    return { pruned: false, reason: "non-win32" };
+  }
+  if (!dataDir) {
+    return { pruned: false, reason: "no-data-dir" };
+  }
+  const ownerPath = path.join(dataDir, "local-host-runtime-owner-v1", "owner");
+  if (!fs.existsSync(ownerPath)) {
+    return { pruned: false, reason: "no-owner" };
+  }
+  const raw = fs.readFileSync(ownerPath, "utf8");
+  const pidMatch = /^process_id=(\d+)\s*$/mu.exec(raw);
+  const pid = pidMatch ? Number(pidMatch[1]) : 0;
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    return { pruned: false, reason: "unparseable" };
+  }
+
+  const result = spawnSync("tasklist.exe", ["/NH", "/FO", "CSV", "/FI", `PID eq ${pid}`], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) {
+    return { pruned: false, reason: "tasklist-failed", pid };
+  }
+
+  let imageName = null;
+  for (const line of String(result.stdout ?? "").split(/\r?\n/u)) {
+    const m = /^"([^"]+)","(\d+)"/u.exec(line.trim());
+    if (m && Number(m[2]) === pid) {
+      imageName = m[1];
+      break;
+    }
+  }
+  if (!imageName) {
+    fs.rmSync(ownerPath, { force: true });
+    return { pruned: true, reason: "pid-missing", pid };
+  }
+  if (imageName.toLowerCase() !== "codexhost-shim.exe") {
+    fs.rmSync(ownerPath, { force: true });
+    return { pruned: true, reason: "pid-reused", pid, imageName };
+  }
+  return { pruned: false, reason: "live-shim", pid, imageName };
+}
+
 export function resolveCodexHost(options = {}) {
   const repoRoot = options.repoRoot ?? REPO_ROOT;
   const targetVersion = options.targetVersion ?? readTargetVersion(repoRoot);
@@ -158,6 +212,13 @@ export function resolveCodexHost(options = {}) {
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const args = process.argv.slice(2);
+  const pruneIdx = args.indexOf("--prune-stale-owner");
+  if (pruneIdx !== -1) {
+    const nextArg = args[pruneIdx + 1];
+    const dataDir = nextArg && !nextArg.startsWith("--") ? nextArg : process.env.CODEXHOST_DATA_DIR;
+    console.log(JSON.stringify(pruneStaleLocalOwner(dataDir)));
+    process.exit(0);
+  }
   const verIdx = args.indexOf("--version");
   const targetVersion = verIdx !== -1 ? args[verIdx + 1] : undefined;
   const isCheck = args.includes("--check");
@@ -196,6 +257,18 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
         `Run "node stage-codexhost.mjs" (safe while running) or "npm ci" (after stopping CodexHost).`,
       );
       process.exit(1);
+    }
+    if (patches && !patches.ok && resolved.selected.kind === "staged") {
+      const repair = spawnSync(process.execPath, [path.join(REPO_ROOT, "stage-codexhost.mjs")], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      if (repair.status !== 0) {
+        const detail = [repair.stdout, repair.stderr].filter(Boolean).join("\n").trim();
+        console.error(`Failed to auto-repair staged CodexHost ${resolved.targetVersion}:\n${detail}`);
+        process.exit(repair.status ?? 1);
+      }
     }
     process.stdout.write(`${resolved.selected.cliCmd}\n`);
   }
