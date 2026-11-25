@@ -9,6 +9,7 @@
 - **持久侧边对话侧栏隔离与桌面扩展状态落盘去重**（`sidechat-sidebar.mjs`）。在 `0.25.1+`（上游 #1052 已于 `host-runtime.mjs` 原生拦截带 `attachedToThreadId` 的 `thread/started` 广播）中自动识别上游内置修复并跳过 `host-runtime.mjs` 改写，保留对 `desktop-controller.mjs` 桥接层 `observeBridgeResult` 的 `thread/fork` 归属登记补丁（旧版 `0.24.0` / `0.22.0` 仍兼容修补两处）；同时对 `0.24.0` 起新增的 `RendererDesktopExtensions.#publish()` 补充按有效载荷（`controllerPid`、`targetId`、`extensions`、`surfaces`）去重，消除每 5 秒创建 `.tmp` 并覆写 `desktop-extensions-v1.json` 的高频磁盘写入循环，避免触发卡巴斯基等杀毒软件的 `PDM` 行为拦截；另提供 `node --disable-warning=ExperimentalWarning .\sidechat-sidebar.mjs --prune-catalog` 清理 `host-state/codex/sqlite/codex.db` 中此前残留的侧栏缓存行。
 - **本机插件白名单**（`enabled-plugins.mjs`）。写入并验证 `plugins/enabled.json`，启用 `antigravity`、`workbuddy` 与 `codex-usage`。
 - **渲染器性能优化**（`renderer-performance.mjs`）。修补 `renderer-extension.js`，跳过对隐藏的 Host 输入框提示控件读取几何尺寸，减少强制样式重算。
+- **简约风桌面壳启动主题保留**（`classic-shell-theme.mjs`）。在保留 `0.26.0` 全部后端服务与新版主界面的前提下，按官方 SHA-256 校验将 `libexec/codexhost-shell.exe` 替换为 `0.25.1` 原版简约风桌面壳（优先复用本地 `0.25.1` 槽位并缓存至 `host-state/shell-theme/`，兜底从官方 npm 包提取；支持在 Windows 运行中通过同卷重命名无感替换）。
 - **版本化安全更新、防误杀自愈与零锁冲突切换**（`resolve-codexhost.mjs`、`stage-codexhost.mjs`）。三个启动器统一按 `package.json` 锁定版本解析 CLI（优先标准 `node_modules/`，其次根目录 `.codexhost-staged/<version>/`，兼容旧 `node_modules/.codexhost-next/`），在启动前通过 `resolve-codexhost.mjs --prune-stale-owner` 清理已退出或被系统服务复用的陈旧 `local-host-runtime-owner-v1/owner` 租约记录，避免运行中 Windows 文件锁冲突、误启动旧版或 `os error 5` 启动阻断；同时自动将系统 `node.exe` 同步至本目录排除范围内的 `host-state/node/node.exe`（附 `node_modules/npm` 目录联接）并在启动器中置顶到 `PATH`，使运行 `desktop-controller.mjs` 的进程映像同样位于本目录排除路径内；若杀毒软件误隔离 `app/` 下的核心脚本（如 `desktop-controller.mjs`），启动解析会自动调用 `stage-codexhost.mjs` 从官方 tarball 原地恢复缺失脚本并重打补丁，无需替换运行中锁定的 `.exe`。
 - **Windows 启动与通知适配**（`Start-CodexHost*`、`Watch-CodexToast.ps1` / `Undo-CodexToastWatcher.ps1`）。提供普通启动、独立试用目录和静默启动入口，启动前统一检测并清理旧的 `ChatGPT.exe`、`codexhost.exe` 与原生桌面壳 `codexhost-shell.exe`，配置 WorkBuddy、Antigravity 路径与代理例外，并拦截系统通知点击额外拉起的官方窗口。
 
@@ -16,7 +17,7 @@
 
 ## 当前启用的运行时补丁
 
-运行 `npm ci` 时会通过 `package.json` 的 `postinstall` 按序自动应用以下 4 个补丁脚本（支持 `--modules <目录>` 指定任意安装槽位，同时保留 `--next` 兼容）：
+运行 `npm ci` 时会通过 `package.json` 的 `postinstall` 按序自动应用以下 5 个补丁脚本（支持 `--modules <目录>` 指定任意安装槽位，同时保留 `--next` 兼容）：
 
 | 补丁脚本 | 修改目标 | 作用说明 |
 | --- | --- | --- |
@@ -24,6 +25,7 @@
 | `sidechat-sidebar.mjs` | `desktop-controller.mjs`（旧版含 `host-runtime.mjs`） | `0.25.1` 起自动识别上游 #1052 的 `host-runtime.mjs` 过滤并保留 `desktop-controller.mjs` 桥接层 `thread/fork` 归属登记与 `RendererDesktopExtensions.#publish` 落盘去重（兼容 `0.24.0` / `0.22.0`），附 `--prune-catalog` 清理工具 |
 | `enabled-plugins.mjs` | `plugins/enabled.json` | 锁定仅启用 `antigravity`、`workbuddy`、`codex-usage` |
 | `renderer-performance.mjs` | `renderer-extension.js` | 隐藏提示控件时跳过 `scrollWidth/clientWidth` 读取 |
+| `classic-shell-theme.mjs` | `libexec/codexhost-shell.exe` | 按官方 SHA-256 校验保留 `0.25.1` 简约风启动选择页与加载页主题（不影响 `0.26.0` 主界面与后端） |
 
 ## 首次使用
 
@@ -105,6 +107,7 @@ npm run verify
 | `sidechat-sidebar.mjs` | 补全桥接层 `thread/fork` 归属登记与 `desktop-extensions-v1.json` 落盘去重（旧版同步过滤 `thread/started` 广播），并支持 `--prune-catalog` 清理历史侧栏缓存 |
 | `enabled-plugins.mjs` | 设置并验证 Host 插件白名单 |
 | `renderer-performance.mjs` | 跳过隐藏的 Host 输入框提示控件的尺寸读取，减少强制样式重算 |
+| `classic-shell-theme.mjs` | 按官方 SHA-256 校验保留 `0.25.1` 简约风桌面壳启动主题 |
 | `Watch-CodexToast.ps1` | 监听通知激活产生的新进程，按限定条件处理额外拉起的窗口 |
 | `Undo-CodexToastWatcher.ps1` | 撤销通知守护改动，并删除守护脚本及自身 |
 | `codex-official.ico` | 启动快捷方式使用的图标 |

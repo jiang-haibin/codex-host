@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "postinstall": "node antigravity-usage.mjs && node sidechat-sidebar.mjs && node enabled-plugins.mjs && node renderer-performance.mjs",
+    "postinstall": "node antigravity-usage.mjs && node sidechat-sidebar.mjs && node enabled-plugins.mjs && node renderer-performance.mjs && node classic-shell-theme.mjs",
     "stage": "node stage-codexhost.mjs",
     "verify": "node resolve-codexhost.mjs --check"
   },

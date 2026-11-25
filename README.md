@@ -8,9 +8,10 @@
 - **持久侧边对话侧栏隔离与桌面扩展状态落盘去重**（`sidechat-sidebar.mjs`）。在 `0.25.1+`（上游 #1052 已原生在 `host-runtime.mjs` 拦截带 `attachedToThreadId` 的 `thread/started` 广播）中自动跳过 `host-runtime.mjs` 改写，保留 `desktop-controller.mjs` 桥接层 `thread/fork` 归属登记补丁（向后兼容 `0.24.0` / `0.22.0`）；同时对 `RendererDesktopExtensions.#publish()` 按有效载荷去重以消除每 5 秒 `.tmp` 覆写 `desktop-extensions-v1.json` 触发杀软 PDM 误拦的风险，并支持 `--prune-catalog` 清理 `codex.db` 中此前残留的侧栏缓存行。
 - **本机插件白名单**（`enabled-plugins.mjs`）。在 `plugins/enabled.json` 中仅启用 `antigravity`、`workbuddy` 与 `codex-usage`。
 - **渲染器性能优化**（`renderer-performance.mjs`）。修补 `renderer-extension.js`，隐藏提示控件时跳过 `scrollWidth/clientWidth` 读取，减少强制样式重算。
+- **简约风桌面壳启动主题保留**（`classic-shell-theme.mjs`）。在保留 `0.26.0` 全部后端服务与新版主界面的前提下，按官方 SHA-256 校验将 `libexec/codexhost-shell.exe` 替换为 `0.25.1` 原版简约风桌面壳（支持运行期同卷重命名无感替换）。
 - **版本化安全升级、杀软误删自愈与 Windows 启动/通知守护**（`resolve-codexhost.mjs`、`stage-codexhost.mjs`、`Start-CodexHost.cmd` / `Start-CodexHost-Silent.vbs` / `Start-CodexHost-Trial.cmd`、`Watch-CodexToast.ps1` / `Undo-CodexToastWatcher.ps1`）。启动器按 `package.json` 锁定版本精确解析 CLI，支持在 `.codexhost-staged/<version>/` 原子预装并避开运行期文件锁；自动将系统 `node.exe` 同步到排除路径内的 `host-state/node/node.exe` 并在启动器中置顶 `PATH`；若杀软误删 `app/` 下核心脚本会在启动前自动从官方包原地恢复并重打补丁；启动前通过 `--prune-stale-owner` 清理已失效或被系统服务复用的陈旧 `owner` 租约防止 `os error 5` 阻断；支持检测与清理 `ChatGPT.exe`、`codexhost.exe` 与原生桌面壳 `codexhost-shell.exe`，配置 WorkBuddy、Antigravity 路径与代理例外，并拦截通知点击额外拉起官方窗口（附回退脚本）。
 
-首次使用请先迁移历史，再在 `windows-local/` 中运行 `npm ci`（`postinstall` 会自动应用当前启用的 4 个补丁脚本；运行中升级可使用 `npm run stage && npm run verify`）。本机路径、各脚本作用与同步边界见 [Windows 定制使用说明](windows-local/README.md)。
+首次使用请先迁移历史，再在 `windows-local/` 中运行 `npm ci`（`postinstall` 会自动应用当前启用的 5 个补丁脚本；运行中升级可使用 `npm run stage && npm run verify`）。本机路径、各脚本作用与同步边界见 [Windows 定制使用说明](windows-local/README.md)。
 
 ---
 

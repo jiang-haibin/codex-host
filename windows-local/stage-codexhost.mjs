@@ -15,6 +15,7 @@ const PATCH_SCRIPTS = [
   "sidechat-sidebar.mjs",
   "enabled-plugins.mjs",
   "renderer-performance.mjs",
+  "classic-shell-theme.mjs",
 ];
 
 function runOrThrow(command, args, options = {}) {

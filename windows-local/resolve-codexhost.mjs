@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ENABLED_PLUGINS } from "./enabled-plugins.mjs";
+import { CLASSIC_SHELL_PLATFORM, CLASSIC_SHELL_SHA256, sha256File } from "./classic-shell-theme.mjs";
 
 export const REPO_ROOT = path.dirname(fileURLToPath(import.meta.url));
 export const PLATFORM_PACKAGE = `@codexhost/cli-${process.platform}-${process.arch}`;
@@ -143,6 +144,13 @@ export function verifyInstalledPatches(modulesDir, repoRoot = REPO_ROOT) {
     const rendererSource = fs.readFileSync(rendererPath, "utf8");
     if (!rendererSource.includes('const visibility = visible && root.scrollWidth > root.clientWidth ? "hidden" : "visible";')) {
       issues.push("renderer-extension.js 缺少隐藏控件尺寸跳过补丁");
+    }
+  }
+
+  if (`${process.platform}-${process.arch}` === CLASSIC_SHELL_PLATFORM) {
+    const shellExePath = path.join(modulesDir, PLATFORM_PACKAGE, "libexec", "codexhost-shell.exe");
+    if (fs.existsSync(shellExePath) && sha256File(shellExePath) !== CLASSIC_SHELL_SHA256) {
+      issues.push("libexec/codexhost-shell.exe 未使用 0.25.1 简约风启动主题（SHA-256 不匹配）");
     }
   }
 
