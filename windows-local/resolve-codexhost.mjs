@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ENABLED_PLUGINS } from "./enabled-plugins.mjs";
 import { CLASSIC_SHELL_PLATFORM, CLASSIC_SHELL_SHA256, sha256File } from "./classic-shell-theme.mjs";
+import { SESSION_DELETE_MARKER } from "./session-delete.mjs";
 
 export const REPO_ROOT = path.dirname(fileURLToPath(import.meta.url));
 export const PLATFORM_PACKAGE = `@codexhost/cli-${process.platform}-${process.arch}`;
@@ -112,6 +113,12 @@ export function verifyInstalledPatches(modulesDir, repoRoot = REPO_ROOT) {
     if (runtimeSource.includes("observeBridgeResult") && !runtimeSource.includes('request.method === "thread/fork"')) {
       issues.push("host-runtime.mjs 缺少 observeBridgeResult thread/fork 归属登记补丁");
     }
+    if (!runtimeSource.includes("codexhost-projectless-workspace-v1")) {
+      issues.push("host-runtime.mjs 缺少 projectless 工作区默认落点补丁");
+    }
+    if (!runtimeSource.includes(SESSION_DELETE_MARKER)) {
+      issues.push("host-runtime.mjs 缺少自带客户端会话删除补丁");
+    }
   }
 
   const controllerPath = path.join(appRoot, "desktop-controller.mjs");
@@ -144,6 +151,22 @@ export function verifyInstalledPatches(modulesDir, repoRoot = REPO_ROOT) {
     const rendererSource = fs.readFileSync(rendererPath, "utf8");
     if (!rendererSource.includes('const visibility = visible && root.scrollWidth > root.clientWidth ? "hidden" : "visible";')) {
       issues.push("renderer-extension.js 缺少隐藏控件尺寸跳过补丁");
+    }
+  }
+
+  const webServerPath = path.join(appRoot, "web-modules", "server.mjs");
+  if (fs.existsSync(webServerPath)) {
+    const webServerSource = fs.readFileSync(webServerPath, "utf8");
+    if (!webServerSource.includes(SESSION_DELETE_MARKER)) {
+      issues.push("web-modules/server.mjs 缺少自带客户端会话删除补丁");
+    }
+  }
+
+  const codexHostUiPath = path.join(appRoot, "web", "plugins", "deepseek-ai__dsh-client-ui-codexhost", "client.js");
+  if (fs.existsSync(codexHostUiPath)) {
+    const codexHostUiSource = fs.readFileSync(codexHostUiPath, "utf8");
+    if (!codexHostUiSource.includes(SESSION_DELETE_MARKER)) {
+      issues.push("web/plugins/deepseek-ai__dsh-client-ui-codexhost/client.js 缺少自带客户端会话删除补丁");
     }
   }
 

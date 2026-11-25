@@ -15,7 +15,9 @@ const PATCH_SCRIPTS = [
   "sidechat-sidebar.mjs",
   "enabled-plugins.mjs",
   "renderer-performance.mjs",
+  "projectless-workspace.mjs",
   "classic-shell-theme.mjs",
+  "session-delete.mjs",
 ];
 
 function runOrThrow(command, args, options = {}) {
@@ -66,6 +68,8 @@ const CORE_APP_RELATIVE_FILES = [
   "host-runtime.mjs",
   "renderer-extension.js",
   "web-server.mjs",
+  path.join("web-modules", "server.mjs"),
+  path.join("web", "plugins", "deepseek-ai__dsh-client-ui-codexhost", "client.js"),
   path.join("plugins", "enabled.json"),
   path.join("plugins", "antigravity", "manifest.json"),
   path.join("plugins", "antigravity", "plugin.mjs"),
@@ -129,6 +133,8 @@ function syntaxCheckInstalled(modulesDir) {
     path.join(appRoot, "host-runtime.mjs"),
     path.join(appRoot, "desktop-controller.mjs"),
     path.join(appRoot, "renderer-extension.js"),
+    path.join(appRoot, "web-modules", "server.mjs"),
+    path.join(appRoot, "web", "plugins", "deepseek-ai__dsh-client-ui-codexhost", "client.js"),
   ];
   for (const file of files) {
     runOrThrow(process.execPath, ["--check", file]);

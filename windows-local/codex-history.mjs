@@ -668,8 +668,49 @@ async function sync() {
   cleanSidebar();
 }
 
-function descendants(db) {
-  const children = new Map();
+// Resolve reported conflicts by keeping the official Codex copy and overwriting the Host copy.
+async function resolveConflicts(ids) {
+  if (!ids.length) throw new Error('Usage: node codex-history.mjs resolve <thread-id> [...]');
+  for (const id of ids) if (!threadIdPattern.test(id)) throw new Error(`Invalid thread id: ${id}`);
+  const ledger = openLedger();
+  const open = [];
+  try {
+    ledger.exec('BEGIN IMMEDIATE');
+    const stockDb = openProfile(stockHome, true, hostHome);
+    open.push(stockDb);
+    const hostDb = openProfile(hostHome, true, stockHome);
+    open.push(hostDb);
+    const stock = scan(stockHome, stockDb);
+    const host = scan(hostHome, hostDb);
+    const save = ledger.prepare('INSERT OR REPLACE INTO baseline VALUES (?, ?, ?)');
+    const queueSidebarUpdate = ledger.prepare('INSERT OR IGNORE INTO sidebar_updates VALUES (?)');
+    const backupDir = path.join(workspace, 'backups', `conflict-resolve-${new Date().toISOString().replace(/[:.]/gu, '-')}`);
+    const resolved = [];
+    for (const id of ids) {
+      const source = stock.get(id);
+      const target = host.get(id);
+      if (!source?.file || !target?.file) throw new Error(`Conflict resolution needs both Codex and Host copies: ${id}`);
+      // Never overwrite a conversation that is still being written.
+      if (!ready(source) || !ready(target, { forWrite: true })) throw new Error(`Conversation is still active: ${id}`);
+      fs.mkdirSync(backupDir, { recursive: true });
+      fs.copyFileSync(target.file, path.join(backupDir, path.basename(target.file)), fs.constants.COPYFILE_EXCL);
+      fs.writeFileSync(path.join(backupDir, `${id}.host-row.json`), JSON.stringify(target.row, null, 2), { flag: 'wx' });
+      const imported = transfer(hostDb, stockHome, source, hostHome, target);
+      save.run(id, source.version, imported.version);
+      queueSidebarUpdate.run(id);
+      resolved.push(id);
+    }
+    ledger.exec('COMMIT');
+    console.log(JSON.stringify({ resolvedStockWins: resolved, hostBackup: resolved.length ? backupDir : null }));
+  } finally {
+    for (const db of open) db.close();
+    ledger.close();
+  }
+  publishSidebars();
+  cleanSidebar();
+}
+
+function descendants(db) {  const children = new Map();
   const edges = db.prepare('SELECT parent_thread_id, child_thread_id FROM state.thread_spawn_edges').all();
   for (const row of db.prepare('SELECT id, source, attached_thread_parent_id FROM state.threads').all()) {
     const parent = parentId(row);
@@ -1106,9 +1147,10 @@ switch (process.argv[2]) {
   case 'projects': migrateProjects(hostHome); break;
   case 'native-history': console.log(JSON.stringify({ migratedWorkBuddy: migrateWorkBuddy(hostData) })); break;
   case 'sync': await sync(); break;
+  case 'resolve': await resolveConflicts(process.argv.slice(3)); break;
   case 'plan': await prune(); break;
   case 'prune': await prune({ apply: true }); break;
   case 'sidebar': await queueExistingSidebarEntries(); cleanSidebar(); break;
   case 'install': installTask(); break;
-  default: console.error('Usage: node codex-history.mjs <migrate|projects|native-history|sync|plan|prune|sidebar|install>'); process.exitCode = 1;
+  default: console.error('Usage: node codex-history.mjs <migrate|projects|native-history|sync|resolve|plan|prune|sidebar|install>'); process.exitCode = 1;
 }

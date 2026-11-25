@@ -1,10 +1,10 @@
 {
   "scripts": {
-    "postinstall": "node antigravity-usage.mjs && node sidechat-sidebar.mjs && node enabled-plugins.mjs && node renderer-performance.mjs && node classic-shell-theme.mjs",
+    "postinstall": "node antigravity-usage.mjs && node sidechat-sidebar.mjs && node enabled-plugins.mjs && node renderer-performance.mjs && node projectless-workspace.mjs && node classic-shell-theme.mjs && node session-delete.mjs",
     "stage": "node stage-codexhost.mjs",
     "verify": "node resolve-codexhost.mjs --check"
   },
   "dependencies": {
-    "@codexhost/cli": "0.26.0"
+    "@codexhost/cli": "0.26.1"
   }
 }
