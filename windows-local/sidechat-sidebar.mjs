@@ -18,6 +18,11 @@ const OLD_OBSERVE_FORK =
 const NEW_OBSERVE_FORK =
   'if (request.method === "thread/start" || request.method === "thread/fork" || request.method === "thread/read" || request.method === "thread/resume") {';
 
+const PUBLISH_DEDUP_MARKER = "codexhost-desktop-extensions-publish-dedup-v1";
+
+const OLD_EXTENSIONS_PUBLISH_PATTERN =
+  /  async #publish\((target\d*)\) \{(\r?\n)    if \(this\.#target !== \1 \|\| this\.#closed\) return;/u;
+
 function replaceOnce(source, target, replacement, label) {
   const parts = source.split(target);
   if (parts.length !== 2) {
@@ -57,8 +62,35 @@ export function patchHostRuntimeSideChatSource(source) {
 }
 
 export function patchDesktopControllerSideChatSource(source) {
-  if (source.includes(NEW_OBSERVE_FORK)) return source;
-  return replaceOnce(source, OLD_OBSERVE_FORK, NEW_OBSERVE_FORK, "desktop-controller.mjs observeBridgeResult");
+  let result = source;
+  if (!result.includes(NEW_OBSERVE_FORK)) {
+    result = replaceOnce(result, OLD_OBSERVE_FORK, NEW_OBSERVE_FORK, "desktop-controller.mjs observeBridgeResult");
+  }
+  // 0.24.0 起新增的 RendererDesktopExtensions.#publish 每 5 秒无条件创建 .tmp 覆写 desktop-extensions-v1.json，需按有效载荷去重以免触发杀软 PDM 行为拦截。
+  if (result.includes("desktop-extensions-v1.json") && !result.includes(PUBLISH_DEDUP_MARKER)) {
+    const matches = [...result.matchAll(new RegExp(OLD_EXTENSIONS_PUBLISH_PATTERN.source, "gu"))];
+    if (matches.length !== 1) {
+      throw new Error(
+        `Unable to patch desktop-controller.mjs RendererDesktopExtensions.#publish: expected one matching anchor (found ${matches.length})`,
+      );
+    }
+    const [fullMatch, targetVar, eol] = matches[0];
+    const replacement = [
+      `  async #publish(${targetVar}) {`,
+      `    if (this.#target !== ${targetVar} || this.#closed) return;`,
+      `    // ${PUBLISH_DEDUP_MARKER}: 仅在扩展与表面状态实际变化时才落盘重写 desktop-extensions-v1.json，消除每 5 秒 .tmp 创建/覆写循环。`,
+      `    const nextSignature = JSON.stringify({`,
+      `      controllerPid: process.pid,`,
+      `      targetId: ${targetVar}.id,`,
+      `      extensions: ${targetVar}.extensions,`,
+      `      surfaces: ${targetVar}.surfaces`,
+      `    });`,
+      `    if (${targetVar}.lastPublishedSignature === nextSignature) return;`,
+      `    ${targetVar}.lastPublishedSignature = nextSignature;`,
+    ].join(eol);
+    result = replaceOnce(result, fullMatch, replacement, "desktop-controller.mjs RendererDesktopExtensions.#publish");
+  }
+  return result;
 }
 
 function resolveModulesUrl(argv) {

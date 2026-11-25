@@ -68,6 +68,9 @@ If exitCode <> 0 Then
 End If
 exitCode = RunHistory("node.exe", "sync")
 shell.Run "cmd.exe /d /c """"node.exe"" """ & fso.BuildPath(baseDir, "resolve-codexhost.mjs") & """ --prune-stale-owner >nul 2>&1""", 0, True
+If fso.FileExists(fso.BuildPath(baseDir, "host-state\node\node.exe")) Then
+    env("PATH") = fso.BuildPath(baseDir, "host-state\node") & ";" & env("PATH")
+End If
 logPath = fso.BuildPath(shell.ExpandEnvironmentStrings("%TEMP%"), "codexhost-silent-launch.log")
 
 ' Keep toast clicks from opening the official Codex instance

@@ -11,9 +11,12 @@ const modelAliases = new Map([
 const modelLabels = Object.freeze({
   "gemini-3.8-flash": "Gemini 3.8 Flash",
   "gemini-4-argon": "Gemini 4 Argon",
+  "gemini-4-carbon": "Gemini 4 Carbon",
   "gemini-4-hydrogen": "Gemini 4 Hydrogen",
   "gemini-4-neon": "Gemini 4 Neon",
   "gemini-pro-orchestrator-g1-pro": "Orchestrator (Argon)",
+  "gemini-pro-orchestrator-argon": "Orchestrator (Argon)",
+  "gemini-pro-orchestrator": "Orchestrator (Carbon)",
   "gemini-pro-orchestrator-neon": "Orchestrator (Neon)",
   "claude-opus-5-5": "Claude Opus 5.5",
   "claude-sonnet-5-5": "Claude Sonnet 5.5",
@@ -21,7 +24,7 @@ const modelLabels = Object.freeze({
 });
 const modelIdsByLabel = new Map(Object.entries(modelLabels).map(([id, label]) => [label, id]));
 // These models have only implicit caching in the Gemini Developer API.
-const implicitCacheModels = new Set(["gemini-4-argon", "gemini-4-hydrogen", "gemini-4-neon"]);
+const implicitCacheModels = new Set(["gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon"]);
 
 function normalizeModelId(value) {
   const aliased = modelAliases.get(value) ?? value;
@@ -447,6 +450,39 @@ export function patchPluginSource(source) {
     return prompt ? { systemPromptAppend: prompt } : {};
   }`;
     result = replaceOnce(result, delegationAnchor, delegationPatched, "plugin.mjs #delegationPrompt");
+  }
+
+  // 将 Antigravity 的 Skip permissions 展示调整为中性样式与“完全访问”文案（不改变底层权限行为）。
+  if (!result.includes("codexhost-antigravity-permission-label-v1")) {
+    const skipModePattern =
+      /(\r?\n)([ \t]*)\{\r?\n[ \t]*id:\s*"dangerously-skip-permissions",[\s\S]*?\r?\n\2\}/u;
+    const match = skipModePattern.exec(result);
+    if (!match) {
+      throw new Error(
+        "Unable to patch plugin.mjs ANTIGRAVITY_PERMISSION_MODE_CATALOG: dangerously-skip-permissions entry not found",
+      );
+    }
+    const eol = match[1];
+    const indent = match[2];
+    const inner = `${indent}  `;
+    const deep = `${indent}    `;
+    const deepest = `${indent}      `;
+    const replacement = [
+      `${eol}${indent}{`,
+      `${inner}// codexhost-antigravity-permission-label-v1`,
+      `${inner}id: "dangerously-skip-permissions",`,
+      `${inner}label: "完全访问",`,
+      `${inner}localizations: {`,
+      `${deep}en: {`,
+      `${deepest}label: "Full access"`,
+      `${deep}},`,
+      `${deep}"zh-CN": {`,
+      `${deepest}label: "完全访问"`,
+      `${deep}}`,
+      `${inner}}`,
+      `${indent}}`,
+    ].join(eol);
+    result = replaceOnce(result, match[0], replacement, "plugin.mjs dangerously-skip-permissions label");
   }
 
   return result;

@@ -4,15 +4,15 @@
 
 - **独立的数据目录与历史迁移**。将 Codex 历史、项目侧栏和部分 Harness 原生历史迁移到本目录的 `host-state/`，启动器统一使用该目录。
 - **官方 Codex 与 Host 的历史同步**。支持增量导入、GPT 会话回写、并发写入检查和冲突报告，保留外部 Harness 的独立历史。可手动同步，也可安装每分钟运行的 Windows 计划任务。
-- **Antigravity 用量与模型补全**（`antigravity-usage.mjs`）。优先使用上游统计，从原生会话数据库和转录文件补全缺失的模型与缓存统计，补充模型切换及新模型标签识别（含 `Gemini 4 Neon`、`Orchestrator (Neon)` 等）。
-- **工具调用与文件修改展示**（`antigravity-usage.mjs`）。沿用 ACP 原生差异，修补 `plugins/antigravity/plugin.mjs` 与 `host-runtime.mjs` 补充 PascalCase 参数、`manage_task`、`search_web`、读取文件与命令执行的展示，以及大文件先搜索后读取的 `read_file` 提示。
-- **持久侧边对话侧栏隔离修复**（`sidechat-sidebar.mjs`）。在 `0.25.1`（上游 #1052 已于 `host-runtime.mjs` 原生拦截带 `attachedToThreadId` 的 `thread/started` 广播）中自动识别上游内置修复并跳过 `host-runtime.mjs` 改写，仅保留对 `desktop-controller.mjs` 桥接层 `observeBridgeResult` 的 `thread/fork` 归属登记补丁（旧版 `0.24.0` / `0.22.0` 仍兼容修补两处）；另提供 `node --disable-warning=ExperimentalWarning .\sidechat-sidebar.mjs --prune-catalog` 清理 `host-state/codex/sqlite/codex.db` 中此前残留的侧栏缓存行。
+- **Antigravity 用量与模型补全**（`antigravity-usage.mjs`）。优先使用上游统计，从原生会话数据库和转录文件补全缺失的模型与缓存统计，补充模型切换及新模型标签识别（含 `Gemini 4 Neon`、`Gemini 4 Carbon`、`Orchestrator (Neon/Carbon/Argon)` 等）。
+- **工具调用与文件修改展示**（`antigravity-usage.mjs`）。沿用 ACP 原生差异，修补 `plugins/antigravity/plugin.mjs` 与 `host-runtime.mjs` 补充 PascalCase 参数、`manage_task`、`search_web`、读取文件与命令执行的展示，补充大文件先搜索后读取的 `read_file` 提示，并将 `dangerously-skip-permissions` 权限按钮样式与文案调整为中性样式和“完全访问”（完整保留 `0.26.0` 新会话默认跳过权限确认的 `defaultModeId`）。
+- **持久侧边对话侧栏隔离与桌面扩展状态落盘去重**（`sidechat-sidebar.mjs`）。在 `0.25.1+`（上游 #1052 已于 `host-runtime.mjs` 原生拦截带 `attachedToThreadId` 的 `thread/started` 广播）中自动识别上游内置修复并跳过 `host-runtime.mjs` 改写，保留对 `desktop-controller.mjs` 桥接层 `observeBridgeResult` 的 `thread/fork` 归属登记补丁（旧版 `0.24.0` / `0.22.0` 仍兼容修补两处）；同时对 `0.24.0` 起新增的 `RendererDesktopExtensions.#publish()` 补充按有效载荷（`controllerPid`、`targetId`、`extensions`、`surfaces`）去重，消除每 5 秒创建 `.tmp` 并覆写 `desktop-extensions-v1.json` 的高频磁盘写入循环，避免触发卡巴斯基等杀毒软件的 `PDM` 行为拦截；另提供 `node --disable-warning=ExperimentalWarning .\sidechat-sidebar.mjs --prune-catalog` 清理 `host-state/codex/sqlite/codex.db` 中此前残留的侧栏缓存行。
 - **本机插件白名单**（`enabled-plugins.mjs`）。写入并验证 `plugins/enabled.json`，启用 `antigravity`、`workbuddy` 与 `codex-usage`。
 - **渲染器性能优化**（`renderer-performance.mjs`）。修补 `renderer-extension.js`，跳过对隐藏的 Host 输入框提示控件读取几何尺寸，减少强制样式重算。
-- **版本化安全更新、防误杀自愈与零锁冲突切换**（`resolve-codexhost.mjs`、`stage-codexhost.mjs`）。三个启动器统一按 `package.json` 锁定版本解析 CLI（优先标准 `node_modules/`，其次根目录 `.codexhost-staged/<version>/`，兼容旧 `node_modules/.codexhost-next/`），在启动前通过 `resolve-codexhost.mjs --prune-stale-owner` 清理已退出或被系统服务复用的陈旧 `local-host-runtime-owner-v1/owner` 租约记录，避免运行中 Windows 文件锁冲突、误启动旧版或 `os error 5` 启动阻断；若杀毒软件误隔离 `app/` 下的核心脚本（如 `desktop-controller.mjs`），启动解析会自动调用 `stage-codexhost.mjs` 从官方 tarball 原地恢复缺失脚本并重打补丁，无需替换运行中锁定的 `.exe`。
-- **Windows 启动与通知适配**（`Start-CodexHost*`、`Watch-CodexToast.ps1` / `Undo-CodexToastWatcher.ps1`）。提供普通启动、独立试用目录和静默启动入口，启动前统一检测并清理旧的 `ChatGPT.exe`、`codexhost.exe` 与 `0.25.1` 新增的原生桌面壳 `codexhost-shell.exe`，配置 WorkBuddy、Antigravity 路径与代理例外，并拦截系统通知点击额外拉起的官方窗口。
+- **版本化安全更新、防误杀自愈与零锁冲突切换**（`resolve-codexhost.mjs`、`stage-codexhost.mjs`）。三个启动器统一按 `package.json` 锁定版本解析 CLI（优先标准 `node_modules/`，其次根目录 `.codexhost-staged/<version>/`，兼容旧 `node_modules/.codexhost-next/`），在启动前通过 `resolve-codexhost.mjs --prune-stale-owner` 清理已退出或被系统服务复用的陈旧 `local-host-runtime-owner-v1/owner` 租约记录，避免运行中 Windows 文件锁冲突、误启动旧版或 `os error 5` 启动阻断；同时自动将系统 `node.exe` 同步至本目录排除范围内的 `host-state/node/node.exe`（附 `node_modules/npm` 目录联接）并在启动器中置顶到 `PATH`，使运行 `desktop-controller.mjs` 的进程映像同样位于本目录排除路径内；若杀毒软件误隔离 `app/` 下的核心脚本（如 `desktop-controller.mjs`），启动解析会自动调用 `stage-codexhost.mjs` 从官方 tarball 原地恢复缺失脚本并重打补丁，无需替换运行中锁定的 `.exe`。
+- **Windows 启动与通知适配**（`Start-CodexHost*`、`Watch-CodexToast.ps1` / `Undo-CodexToastWatcher.ps1`）。提供普通启动、独立试用目录和静默启动入口，启动前统一检测并清理旧的 `ChatGPT.exe`、`codexhost.exe` 与原生桌面壳 `codexhost-shell.exe`，配置 WorkBuddy、Antigravity 路径与代理例外，并拦截系统通知点击额外拉起的官方窗口。
 
-本目录使用 npm 安装的 `@codexhost/cli@0.25.1`。本次由 `0.24.0` 升级至 `0.25.1`，引入上游原生桌面壳与首次启动选择页、Antigravity 后台唤醒与用量/首字耗时改进，以及上游 #1052 持久侧边对话广播过滤修复；外部 Harness 的临时和持久侧聊使用上游实现，沿用来源 Harness（原实验性 `sidechat-gpt.mjs` 与 `0.21.0` 专用的 `antigravity-replay.mjs` 均已退役移除）。[0.25.1 发布说明](https://github.com/BytePioneer-AI/codex-host/releases/tag/v0.25.1)
+本目录使用 npm 安装的 `@codexhost/cli@0.26.0`。本次由 `0.25.1` 升级至 `0.26.0`，带来多远端主机聚合与文件预览、空闲 10 分钟外部会话自动释放、Antigravity 新会话默认跳过权限确认与首轮目录加载重试恢复，以及桌面壳启动引导焕新；外部 Harness 的临时和持久侧聊使用上游实现，沿用来源 Harness（原实验性 `sidechat-gpt.mjs` 与 `0.21.0` 专用的 `antigravity-replay.mjs` 均已退役移除）。[0.26.0 发布说明](https://github.com/BytePioneer-AI/codex-host/releases/tag/v0.26.0)
 
 ## 当前启用的运行时补丁
 
@@ -20,8 +20,8 @@
 
 | 补丁脚本 | 修改目标 | 作用说明 |
 | --- | --- | --- |
-| `antigravity-usage.mjs` | `plugins/antigravity/manifest.json`、`plugin.mjs`、`host-runtime.mjs` | 补全 Antigravity 模型/缓存统计与新模型标签，补充工具参数、任务/搜索/读取展示与 `read_file` 提示 |
-| `sidechat-sidebar.mjs` | `desktop-controller.mjs`（旧版含 `host-runtime.mjs`） | `0.25.1` 起自动识别上游 #1052 的 `host-runtime.mjs` 过滤并仅保留 `desktop-controller.mjs` 桥接层 `thread/fork` 归属登记（兼容 `0.24.0` / `0.22.0`），附 `--prune-catalog` 清理工具 |
+| `antigravity-usage.mjs` | `plugins/antigravity/manifest.json`、`plugin.mjs`、`host-runtime.mjs` | 补全 Antigravity 模型/缓存统计与新模型标签，补充工具参数、任务/搜索/读取展示、`read_file` 提示及“完全访问”权限按钮样式文案 |
+| `sidechat-sidebar.mjs` | `desktop-controller.mjs`（旧版含 `host-runtime.mjs`） | `0.25.1` 起自动识别上游 #1052 的 `host-runtime.mjs` 过滤并保留 `desktop-controller.mjs` 桥接层 `thread/fork` 归属登记与 `RendererDesktopExtensions.#publish` 落盘去重（兼容 `0.24.0` / `0.22.0`），附 `--prune-catalog` 清理工具 |
 | `enabled-plugins.mjs` | `plugins/enabled.json` | 锁定仅启用 `antigravity`、`workbuddy`、`codex-usage` |
 | `renderer-performance.mjs` | `renderer-extension.js` | 隐藏提示控件时跳过 `scrollWidth/clientWidth` 读取 |
 
@@ -87,22 +87,22 @@ npm run verify
 
 ### 回退到上一版本
 
-从 `0.24.0` 升级到 `0.25.1` 期间，原有的 `0.24.0` 运行目录保留在 `.codexhost-staged/0.24.0/`，脚本与配置快照备份于 `backups/v0.24.0-20261123/`（更早的 `0.22.0` 槽位与备份亦保留）。如需回退，只需退出 Host 并将 `package.json` 中的 `@codexhost/cli` 版本改回 `0.24.0`（或恢复该备份目录中的脚本），重新启动即可切回 `0.24.0`。
+从 `0.25.1` 升级到 `0.26.0` 期间，原有的 `0.25.1` 运行目录保留在 `.codexhost-staged/0.25.1/`，脚本与配置快照备份于 `backups/v0.25.1-20261125/`（更早的 `0.24.0` 与 `0.22.0` 槽位与备份亦保留）。如需回退，只需退出 Host 并将 `package.json` 中的 `@codexhost/cli` 版本改回 `0.25.1`（或恢复该备份目录中的脚本），重新启动即可切回 `0.25.1`。
 
-修改补丁脚本后，可通过 `npm run stage`（针对暂存槽位）或对对应 `--modules` 目录重新应用补丁，并运行 `npm run verify` 确认补丁完整生效。`antigravity-usage.mjs` 与 `sidechat-sidebar.mjs` 已适配 `0.25.1`，并保持对 `0.24.0` 与 `0.22.0` 的向后兼容。
+修改补丁脚本后，可通过 `npm run stage`（针对暂存槽位）或对对应 `--modules` 目录重新应用补丁，并运行 `npm run verify` 确认补丁完整生效。`antigravity-usage.mjs` 与 `sidechat-sidebar.mjs` 已适配 `0.26.0`，并保持对 `0.25.1`、`0.24.0` 与 `0.22.0` 的向后兼容。
 
 ## 文件作用
 
 | 文件 | 作用 |
 | --- | --- |
-| `Start-CodexHost.cmd` | 使用 `host-state/` 启动，迁移项目侧栏、执行历史同步并按锁定版本拉起 Host（支持检测清理 `codexhost-shell.exe`） |
+| `Start-CodexHost.cmd` | 使用 `host-state/` 启动，迁移项目侧栏、执行历史同步、优先置顶本地 `host-state/node` 并按锁定版本拉起 Host（支持检测清理 `codexhost-shell.exe`） |
 | `Start-CodexHost-Silent.vbs` | 隐藏终端启动，也为计划任务提供隐藏同步入口 |
 | `Start-CodexHost-Trial.cmd` | 使用独立的 `trial-state/` 配置启动试用实例 |
-| `resolve-codexhost.mjs` | 按 `package.json` 锁定版本解析可用 CLI 路径、校验补丁并在缺失时静默自愈，以及安全清理陈旧 `owner` 租约 |
+| `resolve-codexhost.mjs` | 按 `package.json` 锁定版本解析可用 CLI 路径、校验补丁并在缺失时静默自愈、同步本地 `host-state/node/node.exe` 副本，以及安全清理陈旧 `owner` 租约 |
 | `stage-codexhost.mjs` | 在 `.codexhost-staged/<version>/` 原子预装、补齐被杀软误删的 `app/` 脚本、打补丁并验证目标版本 |
 | `codex-history.mjs` | 历史迁移、增量同步、项目与侧栏处理、Windows 同步计划任务 |
-| `antigravity-usage.mjs` | 补全 Antigravity 用量、新模型标签、工具展示与大文件读取提示 |
-| `sidechat-sidebar.mjs` | 补全桥接层 `thread/fork` 归属登记（旧版同步过滤 `thread/started` 广播），并支持 `--prune-catalog` 清理历史侧栏缓存 |
+| `antigravity-usage.mjs` | 补全 Antigravity 用量、新模型标签、工具展示、大文件读取提示与“完全访问”权限按钮样式文案 |
+| `sidechat-sidebar.mjs` | 补全桥接层 `thread/fork` 归属登记与 `desktop-extensions-v1.json` 落盘去重（旧版同步过滤 `thread/started` 广播），并支持 `--prune-catalog` 清理历史侧栏缓存 |
 | `enabled-plugins.mjs` | 设置并验证 Host 插件白名单 |
 | `renderer-performance.mjs` | 跳过隐藏的 Host 输入框提示控件的尺寸读取，减少强制样式重算 |
 | `Watch-CodexToast.ps1` | 监听通知激活产生的新进程，按限定条件处理额外拉起的窗口 |

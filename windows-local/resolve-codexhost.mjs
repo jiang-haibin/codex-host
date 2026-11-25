@@ -82,6 +82,9 @@ export function verifyInstalledPatches(modulesDir, repoRoot = REPO_ROOT) {
     if (!pluginSource.includes("codexhost-antigravity-read-file-instruction-v1")) {
       issues.push("plugin.mjs 缺少 read_file 大文件提示补丁");
     }
+    if (!pluginSource.includes("codexhost-antigravity-permission-label-v1")) {
+      issues.push("plugin.mjs 缺少完全访问按钮文案与样式补丁");
+    }
   }
 
   const runtimePath = path.join(appRoot, "host-runtime.mjs");
@@ -118,6 +121,12 @@ export function verifyInstalledPatches(modulesDir, repoRoot = REPO_ROOT) {
     if (!controllerSource.includes('request.method === "thread/fork"')) {
       issues.push("desktop-controller.mjs 缺少 observeBridgeResult thread/fork 归属登记补丁");
     }
+    if (
+      controllerSource.includes("desktop-extensions-v1.json") &&
+      !controllerSource.includes("codexhost-desktop-extensions-publish-dedup-v1")
+    ) {
+      issues.push("desktop-controller.mjs 缺少 desktop-extensions-v1.json 落盘去重补丁");
+    }
   }
 
   const enabledPath = path.join(appRoot, "plugins", "enabled.json");
@@ -144,7 +153,39 @@ export function verifyInstalledPatches(modulesDir, repoRoot = REPO_ROOT) {
  * 在 Windows 上安全清理已失效或被系统进程复用的 local-host-runtime-owner-v1/owner，
  * 避免 upstream shim 读取高权限进程启动时间时因 ERROR_ACCESS_DENIED (os error 5) 退出。
  */
+export function ensureLocalNodeBinary(repoRoot = REPO_ROOT) {
+  if (process.platform !== "win32") return null;
+  const localNodeDir = path.join(repoRoot, "host-state", "node");
+  const localNodeExe = path.join(localNodeDir, "node.exe");
+  const srcNodeExe = process.execPath;
+  if (!srcNodeExe || !fs.existsSync(srcNodeExe)) return null;
+  if (path.resolve(srcNodeExe).toLowerCase() === path.resolve(localNodeExe).toLowerCase()) {
+    return localNodeExe;
+  }
+  try {
+    fs.mkdirSync(localNodeDir, { recursive: true });
+    const srcStat = fs.statSync(srcNodeExe);
+    const dstStat = fs.existsSync(localNodeExe) ? fs.statSync(localNodeExe) : null;
+    if (!dstStat || dstStat.size !== srcStat.size || Math.abs(dstStat.mtimeMs - srcStat.mtimeMs) > 1000) {
+      fs.copyFileSync(srcNodeExe, localNodeExe);
+      fs.utimesSync(localNodeExe, srcStat.atime, srcStat.mtime);
+    }
+    const srcNpmDir = path.join(path.dirname(srcNodeExe), "node_modules", "npm");
+    const dstNpmParent = path.join(localNodeDir, "node_modules");
+    const dstNpmDir = path.join(dstNpmParent, "npm");
+    if (fs.existsSync(srcNpmDir) && !fs.existsSync(path.join(dstNpmDir, "bin", "npm-cli.js"))) {
+      fs.mkdirSync(dstNpmParent, { recursive: true });
+      fs.rmSync(dstNpmDir, { recursive: true, force: true });
+      fs.symlinkSync(srcNpmDir, dstNpmDir, "junction");
+    }
+    return localNodeExe;
+  } catch {
+    return null;
+  }
+}
+
 export function pruneStaleLocalOwner(dataDir = process.env.CODEXHOST_DATA_DIR) {
+  ensureLocalNodeBinary();
   if (process.platform !== "win32") {
     return { pruned: false, reason: "non-win32" };
   }

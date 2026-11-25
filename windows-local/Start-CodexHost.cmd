@@ -67,6 +67,7 @@ if not exist "%CODEXHOST_CLI%" (
     exit /b 1
 )
 node "%~dp0resolve-codexhost.mjs" --prune-stale-owner >nul 2>&1
+if exist "%~dp0host-state\node\node.exe" set "PATH=%~dp0host-state\node;%PATH%"
 call "%CODEXHOST_CLI%"
 set "CODEXHOST_EXIT=%ERRORLEVEL%"
 popd
