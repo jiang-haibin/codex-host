@@ -10,12 +10,12 @@
 - **本机插件白名单**（`enabled-plugins.mjs`）。写入并验证 `plugins/enabled.json`，启用 `antigravity`、`workbuddy` 与 `codex-usage`。
 - **渲染器性能优化**（`renderer-performance.mjs`）。修补 `renderer-extension.js`，跳过对隐藏的 Host 输入框提示控件读取几何尺寸，减少强制样式重算。
 - **无项目新聊天落点收进 Host 数据目录**（`projectless-workspace.mjs`）。修补 `host-runtime.mjs` 的 `allocateProjectlessWorkspace`，未选项目的新聊天默认工作区由 `%USERPROFILE%\Documents\Codex\<日期>\<标题>` 改为 `%CODEXHOST_DATA_DIR%\workspaces\<日期>\<标题>`（即 `host-state/host/workspaces/`），对话正文与产物都留在 Host 数据目录；环境变量缺失时保留上游默认路径，显式选择项目目录的行为不变。
-- **简约风桌面壳启动主题保留**（`classic-shell-theme.mjs`）。在保留 `0.26.1` 全部后端服务与新版主界面的前提下，按官方 SHA-256 校验将 `libexec/codexhost-shell.exe` 替换为 `0.25.1` 原版简约风桌面壳（优先复用本地 `0.25.1` 槽位并缓存至 `host-state/shell-theme/`，兜底从官方 npm 包提取；支持在 Windows 运行中通过同卷重命名无感替换）。
-- **自带客户端对话删除功能**（`session-delete.mjs`）。在 `host-runtime.mjs` 开放客户端通道的 `thread/delete` 路由（兼容官方 Codex 与外部 Harness，自动联动清理挂载的侧边对话与树状态），在 `web-modules/server.mjs` 提供 `codexhost/deleteSession` RPC、实时 `thread/deleted` 同步与防复活目录过滤，并在 `web/plugins/deepseek-ai__dsh-client-ui-codexhost/client.js`（采用动态标识符匹配，兼容跨版本重打包）向侧栏会话右键/更多菜单补充带二次确认弹窗的“删除会话”入口（支持活跃、已归档和空白草稿会话，删除当前会话后自动清空主视图）。
+- **简约风桌面壳启动主题保留**（`classic-shell-theme.mjs`）。在保留 `0.27.0` 全部后端服务与新版主界面的前提下，按官方 SHA-256 校验将 `libexec/codexhost-shell.exe` 替换为 `0.25.1` 原版简约风桌面壳（优先复用本地 `0.25.1` 槽位并缓存至 `host-state/shell-theme/`，兜底从官方 npm 包提取；支持在 Windows 运行中通过同卷重命名无感替换；注：如需启用 `0.27.0` 原生桌面壳新增的 50%–200% 统一缩放、语音输入或全新海湾水獭主题，可移除该补丁后重装或切回官方壳）。
+- **自带客户端对话删除功能**（`session-delete.mjs`）。在 `host-runtime.mjs` 开放客户端通道的 `thread/delete` 路由（兼容官方 Codex 与外部 Harness，自动联动清理挂载的侧边对话与树状态，采用动态变量匹配与自包含对象判断以屏蔽跨版本打包重命名），在 `web-modules/server.mjs` 提供 `codexhost/deleteSession` RPC、实时 `thread/deleted` 同步与防复活目录过滤，并在 `web/plugins/deepseek-ai__dsh-client-ui-codexhost/client.js`（采用动态标识符匹配，兼容跨版本重打包）向侧栏会话右键/更多菜单补充带二次确认弹窗的“删除会话”入口（支持活跃、已归档和空白草稿会话，删除当前会话后自动清空主视图）。
 - **版本化安全更新、防误杀自愈与零锁冲突切换**（`resolve-codexhost.mjs`、`stage-codexhost.mjs`）。三个启动器统一按 `package.json` 锁定版本解析 CLI（优先标准 `node_modules/`，其次根目录 `.codexhost-staged/<version>/`，兼容旧 `node_modules/.codexhost-next/`），在启动前通过 `resolve-codexhost.mjs --prune-stale-owner` 清理已退出或被系统服务复用的陈旧 `local-host-runtime-owner-v1/owner` 租约记录，避免运行中 Windows 文件锁冲突、误启动旧版或 `os error 5` 启动阻断；同时自动将系统 `node.exe` 同步至本目录排除范围内的 `host-state/node/node.exe`（附 `node_modules/npm` 目录联接）并在启动器中置顶到 `PATH`，使运行 `desktop-controller.mjs` 的进程映像同样位于本目录排除路径内；若杀毒软件误隔离 `app/` 下的核心脚本（如 `desktop-controller.mjs`），启动解析会自动调用 `stage-codexhost.mjs` 从官方 tarball 原地恢复缺失脚本并重打补丁，无需替换运行中锁定的 `.exe`。
 - **Windows 启动与通知适配**（`Start-CodexHost*`、`Watch-CodexToast.ps1` / `Undo-CodexToastWatcher.ps1`）。提供普通启动、独立试用目录和静默启动入口，启动前统一检测并清理旧的 `ChatGPT.exe`、`codexhost.exe` 与原生桌面壳 `codexhost-shell.exe`，配置 WorkBuddy、Antigravity 路径与代理例外，并拦截系统通知点击额外拉起的官方窗口。
 
-本目录使用 npm 安装的 `@codexhost/cli@0.26.1`。本次由 `0.26.0` 升级至 `0.26.1`，修复 Codex Desktop 26.1120 外部 Harness 权限按钮消失、Antigravity 活动轮次重复唤醒回复、输入流畅度与按需用量统计内存优化，并新增 Web 侧栏顶部色点主机筛选栏、排队消息附件编辑与额度栏倒计时；外部 Harness 的临时和持久侧聊使用上游实现，沿用来源 Harness（原实验性 `sidechat-gpt.mjs` 与 `0.21.0` 专用的 `antigravity-replay.mjs` 均已退役移除）。[0.26.1 发布说明](https://github.com/BytePioneer-AI/codex-host/releases/tag/v0.26.1)
+本目录使用 npm 安装的 `@codexhost/cli@0.27.0`。本次由 `0.26.1` 升级至 `0.27.0`，带来跨 Harness 上下文交接、分段思考摘要预览、跨主机远端委派、Web 工作区与原生 Codex 项目双向同步、Codex 风格审批卡片、Antigravity 原生同轮 Steer 与精准上下文占比投影，以及大列表场景下的显著性能与内存优化；外部 Harness 的临时和持久侧聊使用上游实现，沿用来源 Harness（原实验性 `sidechat-gpt.mjs` 与 `0.21.0` 专用的 `antigravity-replay.mjs` 均已退役移除）。[0.27.0 发布说明](https://github.com/BytePioneer-AI/codex-host/releases/tag/v0.27.0)
 
 ## 当前启用的运行时补丁
 
@@ -28,7 +28,7 @@
 | `enabled-plugins.mjs` | `plugins/enabled.json` | 锁定仅启用 `antigravity`、`workbuddy`、`codex-usage` |
 | `renderer-performance.mjs` | `renderer-extension.js` | 隐藏提示控件时跳过 `scrollWidth/clientWidth` 读取 |
 | `projectless-workspace.mjs` | `host-runtime.mjs` | 无项目新聊天默认工作区改到 `%CODEXHOST_DATA_DIR%\workspaces`，产物不再落入 `Documents\Codex` |
-| `classic-shell-theme.mjs` | `libexec/codexhost-shell.exe` | 按官方 SHA-256 校验保留 `0.25.1` 简约风启动选择页与加载页主题（不影响 `0.26.1` 主界面与后端） |
+| `classic-shell-theme.mjs` | `libexec/codexhost-shell.exe` | 按官方 SHA-256 校验保留 `0.25.1` 简约风启动选择页与加载页主题（不影响 `0.27.0` 主界面与后端） |
 | `session-delete.mjs` | `host-runtime.mjs`、`web-modules/server.mjs`、`web/plugins/deepseek-ai__dsh-client-ui-codexhost/client.js` | 为自带客户端补齐对话永久删除（菜单入口、二次确认弹窗、自动清理侧聊与目录防复活） |
 
 ## 首次使用
@@ -95,9 +95,9 @@ npm run verify
 
 ### 回退到上一版本
 
-从 `0.26.0` 升级到 `0.26.1` 期间，原有的 `0.26.0` 运行目录保留在 `.codexhost-staged/0.26.0/`，脚本与配置快照备份于 `backups/v0.26.0-20261125/`（更早的 `0.25.1`、`0.24.0` 与 `0.22.0` 槽位与备份亦保留）。如需回退，只需退出 Host 并将 `package.json` 中的 `@codexhost/cli` 版本改回 `0.26.0`（或恢复该备份目录中的脚本），重新启动即可切回 `0.26.0`。
+从 `0.26.1` 升级到 `0.27.0` 期间，原有的 `0.26.1` 运行目录保留在 `.codexhost-staged/0.26.1/`，脚本与配置快照备份于 `backups/v0.26.1-20261126/`（更早的 `0.26.0`、`0.25.1`、`0.24.0` 与 `0.22.0` 槽位与备份亦保留）。如需回退，只需退出 Host 并将 `package.json` 中的 `@codexhost/cli` 版本改回 `0.26.1`（或恢复该备份目录中的脚本），重新启动即可切回 `0.26.1`。
 
-修改补丁脚本后，可通过 `npm run stage`（针对暂存槽位）或对对应 `--modules` 目录重新应用补丁，并运行 `npm run verify` 确认补丁完整生效。当前 7 个补丁已全面适配 `0.26.1`，并保持对 `0.26.0` 的向后兼容。
+修改补丁脚本后，可通过 `npm run stage`（针对暂存槽位）或对对应 `--modules` 目录重新应用补丁，并运行 `npm run verify` 确认补丁完整生效。当前 7 个补丁已全面适配 `0.27.0`，并保持对 `0.26.1` 的向后兼容。
 
 ## 文件作用
 

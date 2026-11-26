@@ -12,6 +12,17 @@ function replaceOnce(source, target, replacement, label) {
   return parts[0] + replacement + parts[1];
 }
 
+function replaceOnceRegex(source, pattern, replacer, label) {
+  const globalPattern = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+  const matches = [...source.matchAll(globalPattern)];
+  if (matches.length !== 1) {
+    throw new Error(`Session delete patch needs review (${label}): expected 1 match, found ${matches.length}`);
+  }
+  const match = matches[0];
+  const replacement = typeof replacer === "function" ? replacer(...match) : replacer;
+  return source.slice(0, match.index) + replacement + source.slice(match.index + match[0].length);
+}
+
 // 1. 开放 host-runtime.mjs 的客户端通道 thread/delete，并联动清理附属侧聊与内部状态
 export function patchHostRuntimeSource(source) {
   if (source.includes(SESSION_DELETE_MARKER)) return source;
@@ -43,97 +54,88 @@ export function patchHostRuntimeSource(source) {
   );
 
   // 1d. NativeClientChannel.observeMessage 收到 thread/deleted 时清理状态并触发 onDeleted
-  out = replaceOnce(
+  out = replaceOnceRegex(
     out,
-    '      if (value2.method === "thread/closed") this.#resumedThreads.delete(threadId3);',
-    `      if (value2.method === "thread/closed") this.#resumedThreads.delete(threadId3);
-      if (value2.method === "thread/deleted") {
-        this.#knownThreads.delete(threadId3);
-        this.#resumedThreads.delete(threadId3);
-        this.#configuration.delete(threadId3);
-        this.#interactionErrors.delete(threadId3);
-        for (const pending2 of this.#pending.values()) {
-          if (pending2.threadId === threadId3) this.#deletePending(pending2.requestId);
+    /      if \(([A-Za-z_$][\w$]*)\.method === "thread\/closed"\) this\.#resumedThreads\.delete\(([A-Za-z_$][\w$]*)\);/u,
+    (full, valVar, tidVar) => `${full}
+      if (${valVar}.method === "thread/deleted") {
+        this.#knownThreads.delete(${tidVar});
+        this.#resumedThreads.delete(${tidVar});
+        this.#configuration.delete(${tidVar});
+        this.#interactionErrors.delete(${tidVar});
+        for (const pendingDel of this.#pending.values()) {
+          if (pendingDel.threadId === ${tidVar}) this.#deletePending(pendingDel.requestId);
         }
-        this.#host.onDeleted?.(threadId3);
+        this.#host.onDeleted?.(${tidVar});
       }`,
     "host-runtime NativeClientChannel.observeMessage",
   );
 
   // 1e. NativeClientChannel.observeResponse 处理 thread/delete 成功响应（避免重新 noteThread）
-  out = replaceOnce(
+  out = replaceOnceRegex(
     out,
-    `    if (threadId3) {
-      this.noteThread(threadId3);
-      if (method === "thread/resume") this.#resumedThreads.add(threadId3);
-      if (method === "thread/archive") this.#resumedThreads.delete(threadId3);
-    }`,
-    `    if (threadId3) {
+    /    if \(([A-Za-z_$][\w$]*)\) \{\r?\n      this\.noteThread\(\1\);\r?\n      if \(method === "thread\/resume"\) this\.#resumedThreads\.add\(\1\);\r?\n      if \(method === "thread\/archive"\) this\.#resumedThreads\.delete\(\1\);\r?\n    \}/u,
+    (_full, tidVar) => `    if (${tidVar}) {
       if (method === "thread/delete") {
-        this.#knownThreads.delete(threadId3);
-        this.#resumedThreads.delete(threadId3);
-        this.#configuration.delete(threadId3);
-        this.#interactionErrors.delete(threadId3);
-        for (const pending2 of this.#pending.values()) {
-          if (pending2.threadId === threadId3) this.#deletePending(pending2.requestId);
+        this.#knownThreads.delete(${tidVar});
+        this.#resumedThreads.delete(${tidVar});
+        this.#configuration.delete(${tidVar});
+        this.#interactionErrors.delete(${tidVar});
+        for (const pendingDel of this.#pending.values()) {
+          if (pendingDel.threadId === ${tidVar}) this.#deletePending(pendingDel.requestId);
         }
-        this.#host.onDeleted?.(threadId3);
+        this.#host.onDeleted?.(${tidVar});
       } else {
-        this.noteThread(threadId3);
-        if (method === "thread/resume") this.#resumedThreads.add(threadId3);
-        if (method === "thread/archive") this.#resumedThreads.delete(threadId3);
+        this.noteThread(${tidVar});
+        if (method === "thread/resume") this.#resumedThreads.add(${tidVar});
+        if (method === "thread/archive") this.#resumedThreads.delete(${tidVar});
       }
     }`,
     "host-runtime NativeClientChannel.observeResponse",
   );
 
   // 1f. NativeClientChannel.#request 成功后对 thread/delete 广播 thread/deleted（兼容已归档线程不主动推送通知）
-  out = replaceOnce(
+  out = replaceOnceRegex(
     out,
-    `    if (threadId3 && CHANGED_METHODS.has(method) && !("error" in reply2))
-      this.#host.events.changed(threadId3, method);`,
-    `    if (threadId3 && CHANGED_METHODS.has(method) && !("error" in reply2))
-      this.#host.events.changed(threadId3, method === "thread/delete" ? "thread/deleted" : method);`,
+    /    if \(([A-Za-z_$][\w$]*) && CHANGED_METHODS\.has\(method\) && !\("error" in ([A-Za-z_$][\w$]*)\)\)\r?\n      this\.#host\.events\.changed\(\1, method\);/u,
+    (_full, tidVar, replyVar) => `    if (${tidVar} && CHANGED_METHODS.has(method) && !("error" in ${replyVar}))
+      this.#host.events.changed(${tidVar}, method === "thread/delete" ? "thread/deleted" : method);`,
     "host-runtime NativeClientChannel.#request changed event",
   );
 
   // 1g. ClientChannelHost.observeDesktopMessage 转发 thread/deleted 并从 #clientOwnedThreads 移除
-  out = replaceOnce(
+  out = replaceOnceRegex(
     out,
-    `      if (typeof id3 === "string" && (this.#clientOwnedThreads.has(id3) || thread3?.modelProvider === "codexhost" || this.#host.loadedThread(id3))) {
-        this.#clientOwnedThreads.add(id3);
-        this.clientEvents.changed(id3, value2.method);
-      }`,
-    `      if (typeof id3 === "string" && value2.method === "thread/deleted") {
-        this.#clientOwnedThreads.delete(id3);
-        this.clientEvents.changed(id3, value2.method);
-      } else if (typeof id3 === "string" && (this.#clientOwnedThreads.has(id3) || thread3?.modelProvider === "codexhost" || this.#host.loadedThread(id3))) {
-        this.#clientOwnedThreads.add(id3);
-        this.clientEvents.changed(id3, value2.method);
+    /      if \(typeof ([A-Za-z_$][\w$]*) === "string" && \(this\.#clientOwnedThreads\.has\(\1\) \|\| ([A-Za-z_$][\w$]*)\?\.modelProvider === "codexhost" \|\| this\.#host\.loadedThread\(\1\)\)\) \{\r?\n        this\.#clientOwnedThreads\.add\(\1\);\r?\n        this\.clientEvents\.changed\(\1, ([A-Za-z_$][\w$]*)\.method\);\r?\n      \}/u,
+    (_full, idVar, threadVar, valVar) => `      if (typeof ${idVar} === "string" && ${valVar}.method === "thread/deleted") {
+        this.#clientOwnedThreads.delete(${idVar});
+        this.clientEvents.changed(${idVar}, ${valVar}.method);
+      } else if (typeof ${idVar} === "string" && (this.#clientOwnedThreads.has(${idVar}) || ${threadVar}?.modelProvider === "codexhost" || this.#host.loadedThread(${idVar}))) {
+        this.#clientOwnedThreads.add(${idVar});
+        this.clientEvents.changed(${idVar}, ${valVar}.method);
       }`,
     "host-runtime ClientChannelHost.observeDesktopMessage",
   );
 
   // 1h. ClientChannelHost native 回调增加 onDeleted，联动清理委派关系与树监控
-  out = replaceOnce(
+  out = replaceOnceRegex(
     out,
-    `          desktopConnected: () => this.#options.desktopConnected?.() ?? false`,
-    `          desktopConnected: () => this.#options.desktopConnected?.() ?? false,
-          onDeleted: (threadId3) => void this.#forgetDeletedThread(threadId3).catch((error51) => this.#diagnose(error51))`,
+    /          desktopConnected: \(\) => this\.#options\.desktopConnected\?\.\(\) \?\? false(,?)/u,
+    (_full, trailingComma) =>
+      `          desktopConnected: () => this.#options.desktopConnected?.() ?? false,\n          onDeleted: (delThreadId) => void this.#forgetDeletedThread(delThreadId).catch((delErr) => this.#diagnose(delErr))${trailingComma}`,
     "host-runtime ClientChannelHost native onDeleted",
   );
 
   // 1i. #requestClientNative 删除官方线程前自动清理其挂载的外部/官方侧聊线程
-  out = replaceOnce(
+  out = replaceOnceRegex(
     out,
-    `  async #requestClientNative(method, params2) {
-    try {
-      const response = await this.#requestOfficial(method, params2, false);`,
-    `  async #requestClientNative(method, params2) {
+    /  async #requestClientNative\(method, ([A-Za-z_$][\w$]*)\) \{\r?\n    try \{\r?\n      const response = await this\.#requestOfficial\(method, \1, false\);/u,
+    (_full, paramsVar) => `  async #requestClientNative(method, ${paramsVar}) {
     try {
       // ${SESSION_DELETE_MARKER}
-      if (method === "thread/delete" && isRecord23(params2) && typeof params2.threadId === "string") {
-        const targetId = params2.threadId;
+      const _isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+      if (method === "thread/delete" && _isObj(${paramsVar}) && typeof ${paramsVar}.threadId === "string") {
+        const targetId = ${paramsVar}.threadId;
         const attachedExternal = (await this.#repository.listSummaries().catch(() => [])).filter(
           ({ attachedToThreadId, hostThreadId }) => attachedToThreadId === targetId && hostThreadId !== targetId
         );
@@ -147,20 +149,20 @@ export function patchHostRuntimeSource(source) {
           this.#externalQueue.clear(attached.hostThreadId);
           this.#queuedTurnStarts.delete(attached.hostThreadId);
           this.clientEvents.changed(attached.hostThreadId, "thread/deleted");
-          await this.#forgetDeletedThread(attached.hostThreadId).catch((error51) => this.#diagnose(error51));
+          await this.#forgetDeletedThread(attached.hostThreadId).catch((delErr) => this.#diagnose(delErr));
         }
         const deletedAttached = new Set();
         for (let attempt = 0; attempt < 8; attempt++) {
-          const response = await this.#requestOfficial(method, params2, false);
-          if (isRecord23(response.error)) {
+          const response = await this.#requestOfficial(method, ${paramsVar}, false);
+          if (_isObj(response.error)) {
             const msg = typeof response.error.message === "string" ? response.error.message : "";
             const attachedMatch = /while attached thread ([0-9a-fA-F-]+) exists/u.exec(msg);
             if (attachedMatch && attachedMatch[1] !== targetId && !deletedAttached.has(attachedMatch[1])) {
               deletedAttached.add(attachedMatch[1]);
               const childRes = await this.#requestOfficial("thread/delete", { threadId: attachedMatch[1] }, false);
-              if (!isRecord23(childRes.error)) {
+              if (!_isObj(childRes.error)) {
                 this.clientEvents.changed(attachedMatch[1], "thread/deleted");
-                await this.#forgetDeletedThread(attachedMatch[1]).catch((error51) => this.#diagnose(error51));
+                await this.#forgetDeletedThread(attachedMatch[1]).catch((delErr) => this.#diagnose(delErr));
                 continue;
               }
             }
@@ -174,7 +176,7 @@ export function patchHostRuntimeSource(source) {
           return { result: response.result ?? null };
         }
       }
-      const response = await this.#requestOfficial(method, params2, false);`,
+      const response = await this.#requestOfficial(method, ${paramsVar}, false);`,
     "host-runtime #requestClientNative thread/delete",
   );
 
